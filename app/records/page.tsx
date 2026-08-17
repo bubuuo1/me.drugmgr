@@ -68,8 +68,11 @@ export default function RecordsPage() {
 
   function saveEdit() {
     if (!editId) return;
-    const quantity = parseFloat(editQuantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) return;
+    const editLog = db.medication_logs.find((l) => l.id === editId);
+    const editMed = editLog ? medById.get(editLog.medication_id) : undefined;
+    const booleanOnly = !!editMed && isBooleanOnly(editMed);
+    const quantity = booleanOnly ? editLog!.quantity : parseFloat(editQuantity);
+    if (!booleanOnly && (!Number.isFinite(quantity) || quantity <= 0)) return;
     const [h, m] = editTime.split(":").map(Number);
     const date = new Date(dateKey);
     date.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
@@ -142,46 +145,74 @@ export default function RecordsPage() {
                 {logs.map((log) => {
                   const med = medById.get(log.medication_id);
                   const isEditing = editId === log.id;
+                  const editingBoolean = !!med && isBooleanOnly(med);
                   return (
                     <li
                       key={log.id}
                       className="flex items-center justify-between gap-3 rounded-lg border border-hairline-soft px-4 py-3"
                     >
                       {isEditing ? (
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min={0.5}
-                            step={0.5}
-                            value={editQuantity}
-                            onChange={(e) => setEditQuantity(e.target.value)}
-                            className="h-11 w-20 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
-                            aria-label="복용 개수"
-                          />
-                          <span>{med?.unit ?? ""}</span>
-                          <input
-                            type="time"
-                            value={editTime}
-                            onChange={(e) => setEditTime(e.target.value)}
-                            className="h-11 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
-                            aria-label="복용 시각"
-                          />
-                          <button
-                            type="button"
-                            onClick={saveEdit}
-                            className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary"
-                          >
-                            저장
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditId(null)}
-                            className="rounded-full px-3 py-2 text-sm font-medium text-muted underline"
-                          >
-                            취소
-                          </button>
-                        </div>
+                        editingBoolean ? (
+                          <div className="flex flex-1 flex-wrap items-center gap-2">
+                            <span className="text-base font-medium text-ink">복용</span>
+                            <input
+                              type="time"
+                              value={editTime}
+                              onChange={(e) => setEditTime(e.target.value)}
+                              className="h-11 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
+                              aria-label="복용 시각"
+                            />
+                            <button
+                              type="button"
+                              onClick={saveEdit}
+                              className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary"
+                            >
+                              저장
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditId(null)}
+                              className="rounded-full px-3 py-2 text-sm font-medium text-muted underline"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-1 flex-wrap items-center gap-2">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min={0.5}
+                              step={0.5}
+                              value={editQuantity}
+                              onChange={(e) => setEditQuantity(e.target.value)}
+                              className="h-11 w-20 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
+                              aria-label="복용 개수"
+                            />
+                            <span>{med?.unit ?? ""}</span>
+                            <input
+                              type="time"
+                              value={editTime}
+                              onChange={(e) => setEditTime(e.target.value)}
+                              className="h-11 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
+                              aria-label="복용 시각"
+                            />
+                            <button
+                              type="button"
+                              onClick={saveEdit}
+                              className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary"
+                            >
+                              저장
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditId(null)}
+                              className="rounded-full px-3 py-2 text-sm font-medium text-muted underline"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        )
                       ) : (
                         <>
                           <div className="flex items-center gap-3">
@@ -220,8 +251,8 @@ export default function RecordsPage() {
             </section>
           ))}
 
-            <section className="rounded-2xl border border-hairline px-5 py-4">
-            <h2 className="text-[20px] font-bold text-ink">오늘 총 복용량</h2>
+          <section className="rounded-2xl border border-hairline px-5 py-4">
+            <h2 className="text-[20px] font-bold text-ink">{formatKoreanDate(dateKey)} 총 복용량</h2>
             <ul className="mt-2 flex flex-col gap-1">
               {totals.map(([name, total]) => {
                 const med = medById.get(name);
