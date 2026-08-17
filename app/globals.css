@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  /* Airbnb 디자인 토큰 (docs/03-ui.md §2.1) */
+  --primary: #ff385c;
+  --primary-active: #e00b41;
+  --primary-disabled: #ffd1da;
+  --ink: #222222;
+  --body: #3f3f3f;
+  --muted: #6a6a6a;
+  --muted-soft: #929292;
+  --canvas: #ffffff;
+  --surface-soft: #f7f7f7;
+  --surface-strong: #f2f2f2;
+  --hairline: #dddddd;
+  --hairline-soft: #ebebeb;
+  --on-primary: #ffffff;
+  --error: #c13515;
+  --success: #007a33;
+  --warning: #b32505;
+}
+
+@theme inline {
+  --color-primary: var(--primary);
+  --color-primary-active: var(--primary-active);
+  --color-primary-disabled: var(--primary-disabled);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-muted: var(--muted);
+  --color-muted-soft: var(--muted-soft);
+  --color-canvas: var(--canvas);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-strong: var(--surface-strong);
+  --color-hairline: var(--hairline);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-on-primary: var(--on-primary);
+  --color-error: var(--error);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+/* Airbnb Cereal VF 폰트 사용 불가 시 Inter 대체 (docs/03-ui.md §2.2) */
+@theme inline {
+  --font-sans:
+    "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
+    "Helvetica Neue", sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
+    "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
