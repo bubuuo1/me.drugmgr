@@ -301,6 +301,26 @@ export function useDb() {
     return status;
   }
 
+  function deleteStatus(date: string) {
+    const existing = db.daily_status.find((s) => s.date === date);
+    if (!existing) return;
+    setDb((prev) => ({
+      ...prev,
+      daily_status: prev.daily_status.filter((s) => s.date !== date),
+    }));
+    if (supabase) {
+      void (async () => {
+        const { error } = await supabase
+          .from(TABLES.daily_status)
+          .delete()
+          .eq("id", existing.id);
+        if (error) {
+          setError(`상태 삭제 실패: ${error.message}`);
+        }
+      })();
+    }
+  }
+
   return {
     db,
     loading,
@@ -310,5 +330,6 @@ export function useDb() {
     updateLog,
     deleteLog,
     upsertStatus,
+    deleteStatus,
   };
 }

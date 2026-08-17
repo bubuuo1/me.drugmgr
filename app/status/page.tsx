@@ -16,7 +16,7 @@ type StatusKey = keyof typeof statuses;
 
 export default function StatusPage() {
   const router = useRouter();
-  const { db, upsertStatus } = useDb();
+  const { db, upsertStatus, deleteStatus } = useDb();
   const today = toDateKey(new Date());
   const existing = db.daily_status.find((s) => s.date === today);
 
@@ -48,6 +48,18 @@ export default function StatusPage() {
     }, 700);
   }
 
+  function reset() {
+    deleteStatus(today);
+    setValues({
+      fatigue: null,
+      strength: null,
+      breathing: null,
+      eye: null,
+    });
+    setNote("");
+    setSaved(false);
+  }
+
   return (
     <main className="flex flex-1 flex-col gap-6">
       <header className="flex items-center gap-3 pt-2">
@@ -63,11 +75,20 @@ export default function StatusPage() {
       </header>
 
       {saved ? (
-        <div
-          role="status"
-          className="rounded-2xl bg-surface-soft px-6 py-5 text-center text-lg font-semibold text-body"
-        >
-          오늘 상태를 기록했습니다.
+        <div className="flex flex-col gap-4">
+          <div
+            role="status"
+            className="rounded-2xl bg-surface-soft px-6 py-5 text-center text-lg font-semibold text-body"
+          >
+            오늘 상태를 기록했습니다.
+          </div>
+          <button
+            type="button"
+            onClick={reset}
+            className="flex min-h-[56px] w-full items-center justify-center rounded-lg border border-warning bg-canvas px-6 text-lg font-bold text-warning active:bg-surface-soft"
+          >
+            오늘의 상태 초기화
+          </button>
         </div>
       ) : (
         <>
@@ -126,3 +147,4 @@ export default function StatusPage() {
     </main>
   );
 }
+
