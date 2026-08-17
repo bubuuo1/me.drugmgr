@@ -56,10 +56,11 @@ create index if not exists idx_medication_logs_taken_at on public.medication_log
 create index if not exists idx_medication_logs_medication_id on public.medication_logs (medication_id);
 create index if not exists idx_daily_status_date on public.daily_status (date);
 
--- 시드 데이터: 메스티논 / 소론도
+-- 시드 데이터: 메스티논 / 소론도 / 셉트린정
 insert into public.medications (name, unit, active, quantity_options)
 values ('메스티논', '정', true, '[0.5,1,1.5,2]'::jsonb),
-       ('소론도', '정', true, '[1,2,3,4,5,6,7,8]'::jsonb)
+       ('소론도', '정', true, '[1,2,3,4,5,6,7,8]'::jsonb),
+       ('셉트린정', '', true, '[]'::jsonb)
 on conflict do nothing;
 
 -- 이미 존재하는 시드 행에도 복용 옵션을 반영 (수동 실행 시 기존 데이터 갱신)
@@ -70,6 +71,10 @@ where name = '메스티논';
 update public.medications
 set quantity_options = '[1,2,3,4,5,6,7,8]'::jsonb
 where name = '소론도';
+
+update public.medications
+set unit = '', quantity_options = '[]'::jsonb
+where name = '셉트린정';
 
 -- updated_at 자동 갱신 트리거
 create or replace function public.set_updated_at()

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDb } from "@/lib/store";
 import { isToday, toDateKey } from "@/lib/date";
+import { isBooleanOnly } from "@/lib/types";
 
 export default function Home() {
   const { db } = useDb();
@@ -31,6 +32,7 @@ export default function Home() {
           const todayMedCount = todayLogs
             .filter((l) => l.medication_id === med.id)
             .reduce((sum, l) => sum + l.quantity, 0);
+          const booleanOnly = isBooleanOnly(med);
           return (
             <Link
               key={med.id}
@@ -38,10 +40,22 @@ export default function Home() {
               className="flex min-h-[72px] w-full flex-col items-center justify-center rounded-full bg-primary px-6 text-center text-[20px] font-bold text-on-primary transition-colors hover:bg-primary-active active:bg-primary-active"
             >
               {med.name} 기록
-              {todayMedCount > 0 && (
-                <span className="mt-0.5 text-sm font-semibold text-on-primary/90">
-                  오늘 {todayMedCount}{med.unit} 복용
-                </span>
+              {booleanOnly ? (
+                todayMedCount > 0 ? (
+                  <span className="mt-0.5 text-sm font-semibold text-on-primary/90">
+                    복용함
+                  </span>
+                ) : (
+                  <span className="mt-0.5 text-sm font-semibold text-on-primary/70">
+                    미기록
+                  </span>
+                )
+              ) : (
+                todayMedCount > 0 && (
+                  <span className="mt-0.5 text-sm font-semibold text-on-primary/90">
+                    오늘 {todayMedCount}{med.unit} 복용
+                  </span>
+                )
               )}
             </Link>
           );

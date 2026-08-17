@@ -10,6 +10,7 @@ import {
   isToday,
   toDateKey,
 } from "@/lib/date";
+import { isBooleanOnly } from "@/lib/types";
 
 export default function RecordsPage() {
   const router = useRouter();
@@ -188,8 +189,9 @@ export default function RecordsPage() {
                               {formatDateTime(log.taken_at)}
                             </span>
                             <span className="text-base font-medium text-body">
-                              {log.quantity}
-                              {med?.unit ?? ""}
+                              {med && isBooleanOnly(med)
+                                ? "복용"
+                                : `${log.quantity}${med?.unit ?? ""}`}
                             </span>                          </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -218,15 +220,18 @@ export default function RecordsPage() {
             </section>
           ))}
 
-          <section className="rounded-2xl border border-hairline px-5 py-4">
+            <section className="rounded-2xl border border-hairline px-5 py-4">
             <h2 className="text-[20px] font-bold text-ink">오늘 총 복용량</h2>
             <ul className="mt-2 flex flex-col gap-1">
-              {totals.map(([name, total]) => (
-                <li key={name} className="text-base text-body">
-                  {name} {total}
-                  {medById.get(name)?.unit ?? "정"}
-                </li>
-              ))}
+              {totals.map(([name, total]) => {
+                const med = medById.get(name);
+                const booleanOnly = !!med && isBooleanOnly(med);
+                return (
+                  <li key={name} className="text-base text-body">
+                    {name} {booleanOnly ? "복용함" : `${total}${med?.unit ?? "정"}`}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         </>

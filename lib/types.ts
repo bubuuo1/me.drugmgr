@@ -50,6 +50,10 @@ export function quantityOptionsOf(med: Medication): number[] {
   return DEFAULT_QUANTITY_OPTIONS;
 }
 
+export function isBooleanOnly(med: Medication): boolean {
+  return Array.isArray(med.quantity_options) && med.quantity_options.length === 0;
+}
+
 export type DB = {
   medications: Medication[];
   medication_schedules: MedicationSchedule[];

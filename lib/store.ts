@@ -30,6 +30,15 @@ const SEED_MEDICATIONS: Medication[] = [
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
+  {
+    id: "med-ceftrin",
+    name: "셉트린정",
+    unit: "",
+    active: true,
+    quantity_options: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
 ];
 
 function uid(prefix: string) {

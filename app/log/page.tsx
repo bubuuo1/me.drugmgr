@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Medication } from "@/lib/types";
-import { quantityOptionsOf } from "@/lib/types";
+import { isBooleanOnly, quantityOptionsOf } from "@/lib/types";
 import { useDb } from "@/lib/store";
 import { formatDateTime } from "@/lib/date";
 
@@ -47,6 +47,7 @@ function MedLogInner() {
   }
 
   const currentMed: Medication = med;
+  const booleanOnly = isBooleanOnly(currentMed);
   const quantities = quantityOptionsOf(currentMed);
 
   function save(quantity: number) {
@@ -54,8 +55,9 @@ function MedLogInner() {
       medication_id: currentMed.id,
       quantity,
     });
+    const suffix = booleanOnly ? "" : ` ${quantity}${unit}`;
     setSaved(
-      `${currentMed.name} ${quantity}${unit} / ${formatDateTime(log.taken_at)} 기록 완료`
+      `${currentMed.name}${suffix} / ${formatDateTime(log.taken_at)} 기록 완료`
     );
     setTimeout(() => {
       router.push("/");
@@ -82,7 +84,9 @@ function MedLogInner() {
         <h1 className="text-[24px] font-bold text-ink">{med.name}</h1>
       </header>
 
-      <p className="text-[20px] font-bold text-ink">몇 {unit} 드셨나요?</p>
+      <p className="text-[20px] font-bold text-ink">
+        {booleanOnly ? "오늘 드셨나요?" : `몇 ${unit} 드셨나요?`}
+      </p>
 
       {saved ? (
         <div
@@ -91,6 +95,14 @@ function MedLogInner() {
         >
           {saved}
         </div>
+      ) : booleanOnly ? (
+        <button
+          type="button"
+          onClick={() => save(1)}
+          className="flex min-h-[64px] items-center justify-center rounded-full bg-primary px-6 text-[20px] font-bold text-on-primary active:bg-primary-active"
+        >
+          복용함
+        </button>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">
