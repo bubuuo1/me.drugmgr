@@ -9,6 +9,7 @@ create table if not exists public.medications (
   name text not null,
   unit text not null default '정',
   active boolean not null default true,
+  quantity_options jsonb not null default '[1,2,3,4]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -25,12 +26,13 @@ create table if not exists public.medication_schedules (
 );
 
 -- 3. medication_logs (실제 복용 기록) - 과거 기록은 수정/삭제 시에만 변경
+-- quantity: 소수 복용(0.5정 등) 지원을 위해 numeric 사용
 create table if not exists public.medication_logs (
   id uuid primary key default gen_random_uuid(),
   medication_id uuid not null references public.medications(id) on delete cascade,
   schedule_id uuid null references public.medication_schedules(id) on delete set null,
   taken_at timestamptz not null default now(),
-  quantity integer not null check (quantity > 0),
+  quantity numeric not null check (quantity > 0),
   note text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -55,9 +57,19 @@ create index if not exists idx_medication_logs_medication_id on public.medicatio
 create index if not exists idx_daily_status_date on public.daily_status (date);
 
 -- 시드 데이터: 메스티논 / 소론도
-insert into public.medications (name, unit, active)
-values ('메스티논', '정', true), ('소론도', '정', true)
+insert into public.medications (name, unit, active, quantity_options)
+values ('메스티논', '정', true, '[0.5,1,1.5,2]'::jsonb),
+       ('소론도', '정', true, '[1,2,3,4,5,6,7,8]'::jsonb)
 on conflict do nothing;
+
+-- 이미 존재하는 시드 행에도 복용 옵션을 반영 (수동 실행 시 기존 데이터 갱신)
+update public.medications
+set quantity_options = '[0.5,1,1.5,2]'::jsonb
+where name = '메스티논';
+
+update public.medications
+set quantity_options = '[1,2,3,4,5,6,7,8]'::jsonb
+where name = '소론도';
 
 -- updated_at 자동 갱신 트리거
 create or replace function public.set_updated_at()

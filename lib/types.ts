@@ -3,6 +3,7 @@ export type Medication = {
   name: string;
   unit: string;
   active: boolean;
+  quantity_options?: number[];
   created_at: string;
   updated_at: string;
 };
@@ -39,6 +40,15 @@ export type DailyStatus = {
   created_at: string;
   updated_at: string;
 };
+
+export const DEFAULT_QUANTITY_OPTIONS = [1, 2, 3, 4];
+
+export function quantityOptionsOf(med: Medication): number[] {
+  if (Array.isArray(med.quantity_options) && med.quantity_options.length > 0) {
+    return med.quantity_options;
+  }
+  return DEFAULT_QUANTITY_OPTIONS;
+}
 
 export type DB = {
   medications: Medication[];

@@ -4,6 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Medication } from "@/lib/types";
+import { quantityOptionsOf } from "@/lib/types";
 import { useDb } from "@/lib/store";
 import { formatDateTime } from "@/lib/date";
 
@@ -46,7 +47,7 @@ function MedLogInner() {
   }
 
   const currentMed: Medication = med;
-  const quantities = [1, 2, 3, 4];
+  const quantities = quantityOptionsOf(currentMed);
 
   function save(quantity: number) {
     const log = addLog({
@@ -62,7 +63,7 @@ function MedLogInner() {
   }
 
   function submitCustom() {
-    const n = parseInt(custom, 10);
+    const n = parseFloat(custom);
     if (!Number.isFinite(n) || n <= 0) return;
     save(n);
   }
@@ -114,8 +115,9 @@ function MedLogInner() {
                 <input
                   id="custom-qty"
                   type="number"
-                  inputMode="numeric"
-                  min={1}
+                  inputMode="decimal"
+                  min={0.5}
+                  step={0.5}
                   value={custom}
                   onChange={(e) => setCustom(e.target.value)}
                   className="h-14 min-w-0 flex-1 rounded-lg border border-hairline bg-canvas px-4 text-lg text-ink outline-none focus:border-2 focus:border-ink"

@@ -67,7 +67,7 @@ export default function RecordsPage() {
 
   function saveEdit() {
     if (!editId) return;
-    const quantity = parseInt(editQuantity, 10);
+    const quantity = parseFloat(editQuantity);
     if (!Number.isFinite(quantity) || quantity <= 0) return;
     const [h, m] = editTime.split(":").map(Number);
     const date = new Date(dateKey);
@@ -150,8 +150,9 @@ export default function RecordsPage() {
                         <div className="flex flex-1 flex-wrap items-center gap-2">
                           <input
                             type="number"
-                            inputMode="numeric"
-                            min={1}
+                            inputMode="decimal"
+                            min={0.5}
+                            step={0.5}
                             value={editQuantity}
                             onChange={(e) => setEditQuantity(e.target.value)}
                             className="h-11 w-20 rounded-lg border border-hairline bg-canvas px-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
@@ -189,8 +190,7 @@ export default function RecordsPage() {
                             <span className="text-base font-medium text-body">
                               {log.quantity}
                               {med?.unit ?? ""}
-                            </span>
-                          </div>
+                            </span>                          </div>
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
