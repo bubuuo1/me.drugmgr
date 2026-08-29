@@ -402,6 +402,22 @@ export function DbProvider({ children }: PropsWithChildren) {
   }, [requireSelectedCareSpace, run]);
 
   useEffect(() => {
+    const pathname = globalThis.location.pathname;
+    if (
+      !isMockDbEnabled &&
+      (pathname === "/login" || pathname.startsWith("/auth/"))
+    ) {
+      let cancelled = false;
+      globalThis.queueMicrotask(() => {
+        if (cancelled) return;
+        setInitialized(true);
+        setPendingCount((count) => Math.max(0, count - 1));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     let cancelled = false;
     const generation = repositoryGeneration;
     let preferredId: string | null = null;
