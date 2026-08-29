@@ -11,8 +11,9 @@ import {
   type PropsWithChildren,
 } from "react";
 import type { DbRepository } from "@/lib/db-repository";
-import { fromDateKey } from "@/lib/date";
+import { fromDateKey, toDateKey } from "@/lib/date";
 import { MockDbRepository } from "@/lib/mock-db";
+import { dismissScheduleNotifications } from "@/lib/push-client";
 import { isMockDbEnabled } from "@/lib/supabase";
 import { SupabaseDbRepository } from "@/lib/supabase-db";
 import type {
@@ -375,6 +376,12 @@ export function DbProvider({ children }: PropsWithChildren) {
         client_request_id: clientRequestId,
       };
       const row = await run(() => repository.addLog(prepared));
+      if (row.schedule_id) {
+        await dismissScheduleNotifications(
+          row.schedule_id,
+          toDateKey(new Date(row.taken_at))
+        );
+      }
       setDb((current) => ({
         ...current,
         medication_logs: replaceRow(current.medication_logs, row),
@@ -409,6 +416,12 @@ export function DbProvider({ children }: PropsWithChildren) {
           patch.taken_at === undefined ? undefined : assertIsoDate(patch.taken_at),
       };
       const row = await run(() => repository.updateLog(id, prepared));
+      if (row.schedule_id && row.deleted_at === null) {
+        await dismissScheduleNotifications(
+          row.schedule_id,
+          toDateKey(new Date(row.taken_at))
+        );
+      }
       setDb((current) => ({
         ...current,
         medication_logs: replaceRow(current.medication_logs, row),
@@ -433,6 +446,12 @@ export function DbProvider({ children }: PropsWithChildren) {
   const restoreLog = useCallback(
     async (id: string) => {
       const row = await run(() => repository.restoreLog(id));
+      if (row.schedule_id) {
+        await dismissScheduleNotifications(
+          row.schedule_id,
+          toDateKey(new Date(row.taken_at))
+        );
+      }
       setDb((current) => ({
         ...current,
         medication_logs: replaceRow(current.medication_logs, row),

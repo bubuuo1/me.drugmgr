@@ -63,7 +63,7 @@ async function finishPossibleDuplicateDialog(page: Page) {
   await expect(savedRegion).toBeVisible();
 }
 
-test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인다", async ({
+test("홈에서 빠른 기록, 상태, 복용기록 확인, 설정 진입점이 보인다", async ({
   page,
 }) => {
   await page.goto("/");
@@ -93,7 +93,7 @@ test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인
 
   await expect(page.getByRole("link", { name: /오늘 상태/ })).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "기록 확인", exact: true })
+    page.getByRole("link", { name: "복용기록 확인", exact: true })
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "약·일정 관리", exact: true })
@@ -158,8 +158,14 @@ test("서비스 워커는 오프라인 캐시 없이 푸시 알림만 처리한�
   const source = await response.text();
   expect(source).toContain('addEventListener("push"');
   expect(source).toContain('addEventListener("notificationclick"');
-  expect(source).toContain("renotify: true");
-  expect(source).toContain("vibrate: [200, 100, 200]");
+  expect(source).toContain("getNotifications()");
+  expect(source).toContain("notification.close()");
+  expect(source).toContain("async function displayPushNotification");
+  expect(source).toContain("notificationDisplayQueue");
+  expect(source).toContain("silent: false");
+  expect(source).toContain("vibrate: [300, 150, 300, 150, 500]");
+  expect(source).toContain("logicalTag: payload.tag");
+  expect(source).not.toContain("tag: payload.tag");
   expect(source).not.toContain('addEventListener("fetch"');
 });
 
@@ -189,6 +195,9 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(
     page.getByRole("heading", { level: 1, name: "약과 일정 설정" })
   ).toBeVisible();
+  await expect(
+    page.getByText(/처방받은 약 이름, 수량 선택지와 예정 시각/)
+  ).toHaveCount(0);
 
   await page.getByRole("button", { name: "새 약 추가", exact: true }).click();
   const medicationForm = page.getByRole("group", { name: "새 약" });
@@ -218,10 +227,13 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(settingsCard).toBeVisible();
 
   await settingsCard
-    .getByRole("button", { name: "일정 추가", exact: true })
+    .getByRole("button", {
+      name: `${testMedicationName} 알림 시간 추가`,
+      exact: true,
+    })
     .click();
   let scheduleForm = settingsCard.getByRole("group", {
-    name: testMedicationName + " 일정 입력",
+    name: testMedicationName + " 새 복용·알림 시간 입력",
   });
   await scheduleForm
     .getByLabel("예정 시각", { exact: true })
@@ -230,36 +242,69 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .getByLabel("예정 수량 (정)", { exact: true })
     .fill("1.5");
   await scheduleForm
-    .getByRole("button", { name: "일정 저장", exact: true })
+    .getByRole("button", { name: "이 시간 추가", exact: true })
     .click();
   await expect(
     settingsCard
       .getByRole("listitem")
       .filter({ hasText: keptScheduleTime + " · 1.5정" })
   ).toBeVisible();
-
-  await settingsCard
-    .getByRole("button", { name: "일정 추가", exact: true })
-    .click();
+  await expect(
+    settingsCard.getByRole("heading", {
+      level: 4,
+      name: "복용·알림 시간 (1개)",
+      exact: true,
+    })
+  ).toBeVisible();
   scheduleForm = settingsCard.getByRole("group", {
-    name: testMedicationName + " 일정 입력",
+    name: testMedicationName + " 새 복용·알림 시간 입력",
   });
+  await expect(scheduleForm.getByLabel("예정 시각", { exact: true })).toHaveValue(
+    ""
+  );
+  await expect(
+    scheduleForm.getByLabel("예정 수량 (정)", { exact: true })
+  ).toHaveValue("");
   await scheduleForm.getByLabel("예정 시각", { exact: true }).fill("22:43");
   await scheduleForm
     .getByLabel("예정 수량 (정)", { exact: true })
     .fill("0.5");
   await scheduleForm
-    .getByRole("button", { name: "일정 저장", exact: true })
+    .getByRole("button", { name: "이 시간 추가", exact: true })
     .click();
+  await expect(
+    settingsCard.getByRole("heading", {
+      level: 4,
+      name: "복용·알림 시간 (2개)",
+      exact: true,
+    })
+  ).toBeVisible();
+  await settingsCard
+    .getByRole("button", {
+      name: `${testMedicationName} 시간 추가 닫기`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    settingsCard.getByRole("group", {
+      name: testMedicationName + " 새 복용·알림 시간 입력",
+    })
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(/다른 시간도 이어서 추가할 수 있습니다/)
+  ).toHaveCount(0);
 
   let temporarySchedule = settingsCard
     .getByRole("listitem")
     .filter({ hasText: "22:43 · 0.5정" });
   await temporarySchedule
-    .getByRole("button", { name: "수정", exact: true })
+    .getByRole("button", {
+      name: `${testMedicationName} 22:43 수정`,
+      exact: true,
+    })
     .click();
   const editScheduleForm = temporarySchedule.getByRole("group", {
-    name: testMedicationName + " 일정 입력",
+    name: `${testMedicationName} 22:43 복용·알림 시간 수정`,
   });
   await editScheduleForm
     .getByLabel("예정 시각", { exact: true })
@@ -276,21 +321,60 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .filter({ hasText: editedScheduleTime + " · 1정" });
   await expect(temporarySchedule).toBeVisible();
   await temporarySchedule
-    .getByRole("button", { name: "일정 삭제", exact: true })
+    .getByRole("button", {
+      name: `${testMedicationName} ${editedScheduleTime} 복용·알림 시간 삭제`,
+      exact: true,
+    })
     .click();
   const scheduleDeleteDialog = page.getByRole("dialog", {
-    name: "일정을 삭제할까요?",
+    name: "복용·알림 시간을 삭제할까요?",
   });
   await expect(scheduleDeleteDialog).toContainText(testMedicationName);
   await expect(scheduleDeleteDialog).toContainText(editedScheduleTime);
   await scheduleDeleteDialog
-    .getByRole("button", { name: "일정 삭제", exact: true })
+    .getByRole("button", { name: "복용·알림 시간 삭제", exact: true })
     .click();
   await expect(
     settingsCard
       .getByRole("listitem")
       .filter({ hasText: editedScheduleTime + " · 1정" })
   ).toHaveCount(0);
+
+  await settingsCard
+    .getByRole("button", {
+      name: `${testMedicationName} 알림 시간 추가`,
+      exact: true,
+    })
+    .click();
+  await settingsCard
+    .getByRole("button", { name: "약 비활성화", exact: true })
+    .click();
+  const medicationDeactivateDialog = page.getByRole("dialog", {
+    name: "약을 비활성화할까요?",
+  });
+  await medicationDeactivateDialog
+    .getByRole("button", { name: "약 비활성화", exact: true })
+    .click();
+  await expect(
+    settingsCard.getByRole("group", {
+      name: testMedicationName + " 새 복용·알림 시간 입력",
+    })
+  ).toHaveCount(0);
+  await expect(
+    settingsCard.getByRole("button", {
+      name: `${testMedicationName} 알림 시간 추가`,
+      exact: true,
+    })
+  ).toHaveCount(0);
+  await settingsCard
+    .getByRole("button", { name: "약 다시 활성화", exact: true })
+    .click();
+  await expect(
+    settingsCard.getByRole("button", {
+      name: `${testMedicationName} 알림 시간 추가`,
+      exact: true,
+    })
+  ).toBeVisible();
 
   await page
     .getByRole("link", { name: "첫 화면으로 이동", exact: true })
@@ -356,7 +440,9 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
       .getByRole("link", { name: "추가 복용 기록", exact: true })
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "기록 확인", exact: true }).click();
+  await page
+    .getByRole("link", { name: "복용기록 확인", exact: true })
+    .click();
   const timeline = page.getByRole("region", { name: "투약 타임라인" });
   let logItem = timeline
     .getByRole("listitem")
@@ -429,7 +515,9 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await page
     .getByRole("link", { name: "첫 화면으로 이동", exact: true })
     .click();
-  await page.getByRole("link", { name: "기록 확인", exact: true }).click();
+  await page
+    .getByRole("link", { name: "복용기록 확인", exact: true })
+    .click();
   const statusSection = page.locator("section").filter({
     has: page.getByRole("heading", { level: 2, name: "상태 기록" }),
   });

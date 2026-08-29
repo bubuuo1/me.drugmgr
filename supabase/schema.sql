@@ -7,6 +7,7 @@ create schema if not exists private;
 drop table if exists private.push_deliveries cascade;
 drop table if exists private.push_subscriptions cascade;
 drop function if exists private.push_dispatch_secret_matches(text) cascade;
+drop function if exists private.push_delivery_is_sendable(uuid, timestamptz) cascade;
 drop function if exists public.register_push_subscription(
   text, text, text, timestamptz
 ) cascade;
@@ -21,6 +22,9 @@ drop function if exists public.get_push_subscription_for_test(
 ) cascade;
 drop function if exists public.claim_due_push_notifications(
   text, timestamptz
+) cascade;
+drop function if exists public.prepare_push_delivery_for_send(
+  text, uuid, smallint, timestamptz
 ) cascade;
 drop function if exists public.complete_push_delivery(
   text, uuid, boolean, integer, text, boolean
@@ -600,6 +604,79 @@ as $$
     limit 1;
 $$;
 
+create or replace function private.push_delivery_is_sendable(
+  p_delivery_id uuid,
+  p_now timestamptz
+)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select p_now is not null and exists (
+    select 1
+      from private.push_deliveries as delivery
+      join private.push_subscriptions as subscription
+        on subscription.id = delivery.subscription_id
+      join public.medication_schedules as schedule
+        on schedule.id = delivery.schedule_id
+      join public.medications as medication
+        on medication.id = schedule.medication_id
+      where delivery.id = p_delivery_id
+        and delivery.scheduled_for >
+          date_trunc('minute', p_now) - interval '5 minutes'
+        and delivery.scheduled_for <= date_trunc('minute', p_now)
+        and (delivery.scheduled_for at time zone 'Asia/Seoul')::date =
+          (p_now at time zone 'Asia/Seoul')::date
+        and subscription.disabled_at is null
+        and (
+          subscription.expiration_time is null
+          or subscription.expiration_time > p_now
+        )
+        and schedule.active
+        and medication.active
+        and delivery.scheduled_for >= (
+          (
+            (delivery.scheduled_for at time zone 'Asia/Seoul')::date +
+            schedule.time
+          ) at time zone 'Asia/Seoul'
+        )
+        and mod(
+          extract(
+            epoch from (
+              delivery.scheduled_for -
+              (
+                (
+                  (delivery.scheduled_for at time zone 'Asia/Seoul')::date +
+                  schedule.time
+                ) at time zone 'Asia/Seoul'
+              )
+            )
+          )::numeric,
+          300
+        ) = 0
+        and not exists (
+          select 1
+            from public.medication_logs as log
+            where log.schedule_id = delivery.schedule_id
+              and log.deleted_at is null
+              and log.taken_at >= (
+                (delivery.scheduled_for at time zone 'Asia/Seoul')::date::timestamp
+                  at time zone 'Asia/Seoul'
+              )
+              and log.taken_at < (
+                (
+                  (delivery.scheduled_for at time zone 'Asia/Seoul')::date + 1
+                )::timestamp at time zone 'Asia/Seoul'
+              )
+        )
+  );
+$$;
+
+revoke all on function private.push_delivery_is_sendable(uuid, timestamptz)
+  from public, anon, authenticated;
+
 create or replace function public.claim_due_push_notifications(
   p_dispatch_secret text,
   p_now timestamptz
@@ -635,21 +712,7 @@ begin
       and delivery.scheduled_for >
         date_trunc('minute', p_now) - interval '5 minutes'
       and delivery.scheduled_for <= date_trunc('minute', p_now)
-      and exists (
-        select 1
-          from public.medication_logs as log
-          where log.schedule_id = delivery.schedule_id
-            and log.deleted_at is null
-            and log.taken_at >= (
-              (delivery.scheduled_for at time zone 'Asia/Seoul')::date::timestamp
-                at time zone 'Asia/Seoul'
-            )
-            and log.taken_at < (
-              (
-                (delivery.scheduled_for at time zone 'Asia/Seoul')::date + 1
-              )::timestamp at time zone 'Asia/Seoul'
-            )
-      );
+      and not private.push_delivery_is_sendable(delivery.id, p_now);
 
   return query
   with bounds as (
@@ -776,6 +839,7 @@ begin
         )
         and schedule.active
         and medication.active
+        and private.push_delivery_is_sendable(delivery.id, p_now)
       order by delivery.scheduled_for, delivery.id
       for update of delivery skip locked
   ),
@@ -833,6 +897,98 @@ begin
     join public.medications as medication
       on medication.id = schedule.medication_id
     order by claimed.scheduled_for, claimed.id;
+end;
+$$;
+
+create or replace function public.prepare_push_delivery_for_send(
+  p_dispatch_secret text,
+  p_delivery_id uuid,
+  p_attempt_count smallint,
+  p_now timestamptz
+)
+returns table (
+  delivery_id uuid,
+  attempt_count smallint,
+  endpoint text,
+  p256dh text,
+  auth text,
+  title text,
+  body text,
+  url text,
+  tag text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_delivery_id is null
+    or p_attempt_count is null
+    or p_attempt_count < 1
+    or p_now is null
+  then
+    raise null_value_not_allowed using message = 'delivery preparation values are required';
+  end if;
+  if not private.push_dispatch_secret_matches(p_dispatch_secret) then
+    raise insufficient_privilege using message = 'invalid push dispatch secret';
+  end if;
+
+  return query
+  with locked_delivery as (
+    select
+      delivery.id,
+      delivery.subscription_id,
+      delivery.schedule_id,
+      delivery.scheduled_for,
+      delivery.attempt_count
+      from private.push_deliveries as delivery
+      where delivery.id = p_delivery_id
+        and delivery.status = 'pending'
+        and delivery.attempt_count = p_attempt_count
+      for update
+  ),
+  valid_delivery as (
+    select
+      locked.id,
+      locked.subscription_id,
+      locked.schedule_id,
+      locked.scheduled_for,
+      locked.attempt_count
+      from locked_delivery as locked
+      where private.push_delivery_is_sendable(locked.id, p_now)
+  ),
+  skipped as (
+    update private.push_deliveries as delivery
+      set status = 'skipped',
+          error_code = null,
+          response_status = null
+      from locked_delivery as locked
+      where delivery.id = locked.id
+        and not exists (
+          select 1 from valid_delivery
+        )
+      returning delivery.id
+  )
+  select
+    valid.id,
+    valid.attempt_count,
+    subscription.endpoint,
+    subscription.p256dh,
+    subscription.auth,
+    to_char(schedule.time, 'HH24:MI') || ' ' || medication.name || ' 예정',
+    '투약 기록을 확인해 주세요.',
+    '/log?med=' || schedule.medication_id::text ||
+      '&schedule=' || schedule.id::text,
+    'schedule-' || replace(schedule.id::text, '-', '') || '-' ||
+      to_char(valid.scheduled_for at time zone 'Asia/Seoul', 'YYYYMMDD')
+    from valid_delivery as valid
+    join private.push_subscriptions as subscription
+      on subscription.id = valid.subscription_id
+    join public.medication_schedules as schedule
+      on schedule.id = valid.schedule_id
+    join public.medications as medication
+      on medication.id = schedule.medication_id
+    where not exists (select 1 from skipped);
 end;
 $$;
 
@@ -894,6 +1050,9 @@ revoke execute on function public.get_push_subscription_for_test(text, text, tex
   from public, authenticated;
 revoke execute on function public.claim_due_push_notifications(text, timestamptz)
   from public, authenticated;
+revoke execute on function public.prepare_push_delivery_for_send(
+  text, uuid, smallint, timestamptz
+) from public, authenticated;
 revoke execute on function public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) from public, authenticated;
@@ -908,6 +1067,9 @@ grant execute on function public.get_push_subscription_for_test(text, text, text
   to anon;
 grant execute on function public.claim_due_push_notifications(text, timestamptz)
   to anon;
+grant execute on function public.prepare_push_delivery_for_send(
+  text, uuid, smallint, timestamptz
+) to anon;
 grant execute on function public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) to anon;

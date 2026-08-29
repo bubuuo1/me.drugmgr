@@ -203,8 +203,8 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
           투약 일정 알림
         </h2>
         <p className="text-base leading-relaxed text-body">
-          활성 일정의 예정 시각부터 해당 날짜의 같은 일정 기록이 생길 때까지
-          5분마다 이 기기로 알림을 보냅니다.
+          등록한 각 복용·알림 시간부터 5분마다 알림을 반복하고, 해당 시간의
+          투약 기록이 생기거나 시간을 끄거나 삭제하면 반복을 중단합니다.
         </p>
         <p className="text-base font-semibold text-ink" role="status">
           {statusText(state)}

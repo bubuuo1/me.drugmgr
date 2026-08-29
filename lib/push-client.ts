@@ -63,3 +63,39 @@ export async function subscribeBrowserToPush(
     applicationServerKey: urlBase64ToUint8Array(publicKey),
   });
 }
+
+export async function dismissScheduleNotifications(
+  scheduleIds: string | string[],
+  dateKey?: string
+): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+
+  const ids = Array.isArray(scheduleIds) ? scheduleIds : [scheduleIds];
+  const logicalTagPrefixes = ids.map(
+    (id) => `schedule-${id.replace(/-/g, "")}-`
+  );
+  const logicalTags = dateKey
+    ? logicalTagPrefixes.map((prefix) => `${prefix}${dateKey.replace(/-/g, "")}`)
+    : null;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    if (!registration) return;
+
+    const notifications = await registration.getNotifications();
+    for (const notification of notifications) {
+      const logicalTag =
+        typeof notification.data?.logicalTag === "string"
+          ? notification.data.logicalTag
+          : notification.tag;
+      const matches = logicalTags
+        ? logicalTags.includes(logicalTag)
+        : logicalTagPrefixes.some((prefix) => logicalTag.startsWith(prefix));
+      if (matches) {
+        notification.close();
+      }
+    }
+  } catch {
+    // Closing an already displayed notification is a best-effort UI cleanup.
+  }
+}

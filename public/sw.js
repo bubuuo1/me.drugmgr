@@ -21,6 +21,30 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+let notificationDisplayQueue = Promise.resolve();
+
+async function displayPushNotification(payload) {
+  try {
+    const notifications = await self.registration.getNotifications();
+    for (const notification of notifications) {
+      const logicalTag = notification.data?.logicalTag;
+      if (logicalTag === payload.tag || notification.tag === payload.tag) {
+        notification.close();
+      }
+    }
+  } catch {
+    // Existing-notification cleanup is best effort; the new alert must still show.
+  }
+
+  await self.registration.showNotification(payload.title, {
+    body: payload.body,
+    icon: payload.icon,
+    silent: false,
+    vibrate: [300, 150, 300, 150, 500],
+    data: { url: payload.url, logicalTag: payload.tag },
+  });
+}
+
 self.addEventListener("push", (event) => {
   let payload = {
     title: "투약 일정 알림",
@@ -45,16 +69,10 @@ self.addEventListener("push", (event) => {
     }
   }
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: payload.icon,
-      tag: payload.tag,
-      renotify: true,
-      vibrate: [200, 100, 200],
-      data: { url: payload.url },
-    })
-  );
+  notificationDisplayQueue = notificationDisplayQueue
+    .catch(() => undefined)
+    .then(() => displayPushNotification(payload));
+  event.waitUntil(notificationDisplayQueue);
 });
 
 self.addEventListener("notificationclick", (event) => {

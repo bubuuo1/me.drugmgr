@@ -11,6 +11,7 @@ import {
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import { PushNotificationsCard } from "@/app/settings/push-notifications-card";
+import { dismissScheduleNotifications } from "@/lib/push-client";
 import { useDb } from "@/lib/store";
 import type { Medication, MedicationSchedule } from "@/lib/types";
 import { isBooleanOnly } from "@/lib/types";
@@ -184,6 +185,16 @@ export default function SettingsPage() {
     beginMutation(`medication-active-${medication.id}`);
     try {
       await updateMedication(medication.id, { active: !medication.active });
+      if (medication.active) {
+        if (addingScheduleFor === medication.id) {
+          closeScheduleAdd();
+        }
+        await dismissScheduleNotifications(
+          db.medication_schedules
+            .filter((schedule) => schedule.medication_id === medication.id)
+            .map((schedule) => schedule.id)
+        );
+      }
       setSuccess(
         medication.active
           ? `${medication.name}을 비활성화했습니다.`
@@ -208,8 +219,17 @@ export default function SettingsPage() {
     setSuccess(null);
   }
 
+  function closeScheduleAdd() {
+    setAddingScheduleFor(null);
+    setScheduleDraft({ time: "", quantity: "" });
+    setFieldError(null);
+    setSuccess(null);
+  }
+
   async function createSchedule(medication: Medication) {
     if (pendingKey || !online) return;
+    setFieldError(null);
+    setSuccess(null);
     try {
       const quantity = isBooleanOnly(medication)
         ? 1
@@ -219,15 +239,20 @@ export default function SettingsPage() {
         throw new Error("예정 수량을 0보다 큰 숫자로 입력해 주세요.");
       }
       beginMutation(`schedule-add-${medication.id}`);
+      const addedTime = scheduleDraft.time;
       await addSchedule({
         medication_id: medication.id,
-        time: scheduleDraft.time,
+        time: addedTime,
         default_quantity: quantity,
         active: true,
       });
-      setAddingScheduleFor(null);
-      setScheduleDraft({ time: "", quantity: "" });
-      setSuccess(`${medication.name} ${scheduleDraft.time} 일정을 추가했습니다.`);
+      setScheduleDraft({
+        time: "",
+        quantity: isBooleanOnly(medication) ? "1" : "",
+      });
+      setSuccess(
+        `${medication.name} ${addedTime} 시간을 추가했습니다. 다른 시간도 이어서 추가할 수 있습니다.`
+      );
     } catch (caught) {
       setFieldError(messageOf(caught));
     } finally {
@@ -265,6 +290,7 @@ export default function SettingsPage() {
         time: editingScheduleDraft.time,
         default_quantity: quantity,
       });
+      await dismissScheduleNotifications(schedule.id);
       setEditingScheduleId(null);
       setSuccess(`${medication.name} 일정을 수정했습니다.`);
     } catch (caught) {
@@ -282,6 +308,9 @@ export default function SettingsPage() {
     beginMutation(`schedule-active-${schedule.id}`);
     try {
       await updateSchedule(schedule.id, { active: !schedule.active });
+      if (schedule.active) {
+        await dismissScheduleNotifications(schedule.id);
+      }
       setSuccess(
         `${medication.name} ${schedule.time} 일정을 ${
           schedule.active ? "비활성화" : "활성화"
@@ -299,7 +328,8 @@ export default function SettingsPage() {
     beginMutation(`schedule-delete-${schedule.id}`);
     try {
       await deleteSchedule(schedule.id);
-      setSuccess(`${schedule.time} 일정을 삭제했습니다.`);
+      await dismissScheduleNotifications(schedule.id);
+      setSuccess(`${schedule.time} 복용·알림 시간을 삭제했습니다.`);
       setConfirmation(null);
     } catch (caught) {
       setLocalError(messageOf(caught));
@@ -321,11 +351,6 @@ export default function SettingsPage() {
   return (
     <main className="flex flex-1 flex-col gap-7">
       <PageHeader title="약과 일정 설정" />
-
-      <p className="rounded-2xl bg-surface-soft px-5 py-4 text-base leading-relaxed text-body">
-        처방받은 약 이름, 수량 선택지와 예정 시각을 그대로 입력해 주세요. 앱은
-        복용량이나 일정을 추천하지 않습니다. 설정을 바꿔도 과거 기록은 유지됩니다.
-      </p>
 
       <PushNotificationsCard online={online} />
 
@@ -451,34 +476,47 @@ export default function SettingsPage() {
 
                 <section className="mt-6 border-t border-hairline-soft pt-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h4 className="text-lg font-bold text-ink">복용 예정 시간</h4>
+                    <div>
+                      <h4 className="text-lg font-bold text-ink">
+                        복용·알림 시간 ({schedules.length}개)
+                      </h4>
+                      <p className="mt-1 text-sm leading-relaxed text-muted">
+                        필요한 시간만큼 추가할 수 있습니다.
+                      </p>
+                    </div>
                     {medication.active && (
                       <button
                         type="button"
                         onClick={() =>
                           addingScheduleFor === medication.id
-                            ? setAddingScheduleFor(null)
+                            ? closeScheduleAdd()
                             : startScheduleAdd(medication)
                         }
+                        aria-label={`${medication.name} ${
+                          addingScheduleFor === medication.id
+                            ? "시간 추가 닫기"
+                            : "알림 시간 추가"
+                        }`}
                         disabled={pendingKey !== null || !online}
                         className="flex min-h-12 items-center justify-center rounded-full border border-ink bg-canvas px-4 text-base font-bold text-ink"
                       >
                         {addingScheduleFor === medication.id
-                          ? "일정 추가 취소"
-                          : "일정 추가"}
+                          ? "시간 추가 닫기"
+                          : "알림 시간 추가"}
                       </button>
                     )}
                   </div>
 
-                  {addingScheduleFor === medication.id && (
+                  {medication.active && addingScheduleFor === medication.id && (
                     <div className="mt-4">
                       <ScheduleForm
                         medication={medication}
+                        legend={`${medication.name} 새 복용·알림 시간 입력`}
                         draft={scheduleDraft}
                         setDraft={setScheduleDraft}
                         pending={pendingKey === `schedule-add-${medication.id}`}
                         available={online}
-                        saveLabel="일정 저장"
+                        saveLabel="이 시간 추가"
                         onSave={() => createSchedule(medication)}
                       />
                     </div>
@@ -517,6 +555,9 @@ export default function SettingsPage() {
                                     ? setEditingScheduleId(null)
                                     : startScheduleEdit(schedule)
                                 }
+                                aria-label={`${medication.name} ${schedule.time} ${
+                                  scheduleEditing ? "수정 취소" : "수정"
+                                }`}
                                 disabled={pendingKey !== null || !online}
                                 className="flex min-h-12 items-center justify-center rounded-full border border-hairline px-4 text-base font-bold text-ink"
                               >
@@ -528,6 +569,7 @@ export default function SettingsPage() {
                               <div className="mt-4">
                                 <ScheduleForm
                                   medication={medication}
+                                  legend={`${medication.name} ${schedule.time} 복용·알림 시간 수정`}
                                   draft={editingScheduleDraft}
                                   setDraft={setEditingScheduleDraft}
                                   pending={pendingKey === `schedule-${schedule.id}`}
@@ -544,10 +586,13 @@ export default function SettingsPage() {
                               <button
                                 type="button"
                                 onClick={() => void toggleSchedule(medication, schedule)}
+                                aria-label={`${medication.name} ${schedule.time} ${
+                                  schedule.active ? "시간 끄기" : "시간 켜기"
+                                }`}
                                 disabled={pendingKey !== null || !online}
                                 className="flex min-h-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-base font-bold text-body"
                               >
-                                {schedule.active ? "일정 끄기" : "일정 켜기"}
+                                {schedule.active ? "시간 끄기" : "시간 켜기"}
                               </button>
                               <button
                                 type="button"
@@ -558,10 +603,11 @@ export default function SettingsPage() {
                                     medication,
                                   })
                                 }
+                                aria-label={`${medication.name} ${schedule.time} 복용·알림 시간 삭제`}
                                 disabled={pendingKey !== null || !online}
                                 className="flex min-h-12 items-center justify-center rounded-full border border-warning bg-canvas px-3 text-base font-bold text-warning"
                               >
-                                일정 삭제
+                                복용·알림 시간 삭제
                               </button>
                             </div>
                           </li>
@@ -600,7 +646,7 @@ export default function SettingsPage() {
             <p>
               <strong className="text-ink">{confirmation.medication.name}</strong>이
               첫 화면에서 숨겨지고 관련 일정도 표시되지 않습니다. 과거 기록은
-              유지됩니다.
+              유지되며 관련 반복 알림은 중단됩니다.
             </p>
           }
           confirmLabel="약 비활성화"
@@ -613,16 +659,17 @@ export default function SettingsPage() {
 
       {confirmation?.kind === "schedule" && (
         <ConfirmDialog
-          title="일정을 삭제할까요?"
+          title="복용·알림 시간을 삭제할까요?"
           description={
             <p>
               <strong className="text-ink">
                 {confirmation.medication.name} {confirmation.schedule.time}
               </strong>
-              일정을 삭제합니다. 이미 작성한 투약 기록은 유지됩니다.
+              시간을 삭제합니다. 첫 화면의 해당 예정 시간과 반복 알림은
+              제거되고, 이미 작성한 투약 기록은 유지됩니다.
             </p>
           }
-          confirmLabel="일정 삭제"
+          confirmLabel="복용·알림 시간 삭제"
           destructive
           pending={pendingKey !== null}
           onCancel={() => setConfirmation(null)}
@@ -720,6 +767,7 @@ function MedicationForm({
 
 type ScheduleFormProps = {
   medication: Medication;
+  legend: string;
   draft: ScheduleDraft;
   setDraft: (draft: ScheduleDraft) => void;
   pending: boolean;
@@ -730,6 +778,7 @@ type ScheduleFormProps = {
 
 function ScheduleForm({
   medication,
+  legend,
   draft,
   setDraft,
   pending,
@@ -742,7 +791,7 @@ function ScheduleForm({
       disabled={pending}
       className="grid gap-4 rounded-xl bg-surface-soft px-4 py-4"
     >
-      <legend className="sr-only">{medication.name} 일정 입력</legend>
+      <legend className="sr-only">{legend}</legend>
       <label className="flex flex-col gap-2 text-base font-bold text-body">
         예정 시각
         <input

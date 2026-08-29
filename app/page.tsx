@@ -177,7 +177,7 @@ export default function Home() {
           href="/records"
           className="flex min-h-[4.5rem] w-full items-center justify-center rounded-full border-2 border-ink bg-canvas px-6 text-xl font-bold text-ink active:bg-surface-soft"
         >
-          기록 확인
+          복용기록 확인
         </Link>
       </nav>
 

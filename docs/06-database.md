@@ -50,7 +50,7 @@ Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 수정 시각 |
 
-같은 약에 같은 예정 시각을 중복 생성하지 않는다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정해도 기존 로그의 `schedule_time` 스냅샷은 변경하지 않는다.
+한 약에 서로 다른 예정 시각을 여러 개 저장할 수 있고, 같은 약에 같은 예정 시각만 중복 생성하지 않는다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정하거나 삭제해도 기존 로그의 `schedule_time` 스냅샷은 변경하지 않는다.
 
 ## 4. medication_logs
 
@@ -144,14 +144,16 @@ insert trigger가 현재 약 이름·단위와 연결 일정 시각을 스냅샷
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 마지막 수정 시각 |
 
-`subscription_id + schedule_id + scheduled_for`는 unique다. 최초 예정 시각과 이후 5분 간격의 각 회차가 별도 `scheduled_for`를 사용하므로 같은 회차는 중복 생성되지 않는다. 같은 한국 날짜에 같은 일정의 삭제되지 않은 투약 로그가 이미 있으면 새 회차를 만들지 않으며, 직전에 만들어진 `pending/failed` 회차는 `skipped`로 바꾸고 발송하지 않는다. `accepted`는 push service가 요청을 접수했다는 의미이며 기기에 정시에 표시되었음을 보장하지 않는다.
+`subscription_id + schedule_id + scheduled_for`는 unique다. 최초 예정 시각과 이후 5분 간격의 각 회차가 별도 `scheduled_for`를 사용하므로 같은 회차는 중복 생성되지 않는다. 같은 한국 날짜에 같은 일정의 삭제되지 않은 투약 로그가 있거나 일정·약·구독이 비활성이면 새 회차를 만들지 않으며, 직전에 만들어진 `pending/failed` 회차는 `skipped`로 바꾸고 발송하지 않는다. `accepted`는 push service가 요청을 접수했다는 의미이며 기기에 정시에 표시되었음을 보장하지 않는다.
 
-기록이 없는 동안 생성되는 5분 간격 알림 회차와 네트워크 실패 재시도는 서로 다른 개념이다. 각 새 회차는 1회차 시도 번호와 함께 점유한다. 요청 중단이나 일시 실패가 발생하면 해당 회차부터 5분 이내에 최대 3회까지 같은 delivery 행을 다시 점유하며, 시도 번호가 맞는 결과만 완료 처리한다. 같은 일정과 한국 날짜에는 같은 notification tag를 사용해 반복 알림이 기기에서 하나의 알림 항목을 갱신하게 한다.
+기록이 없는 동안 생성되는 5분 간격 알림 회차와 네트워크 실패 재시도는 서로 다른 개념이다. 각 새 회차는 1회차 시도 번호와 함께 점유한다. 요청 중단이나 일시 실패가 발생하면 해당 회차부터 5분 이내에 최대 3회까지 같은 delivery 행을 다시 점유하며, 시도 번호가 맞는 결과만 완료 처리한다. 같은 일정과 한국 날짜에는 같은 논리 식별자와 Web Push topic을 사용한다. 기기에서는 기존 표시를 닫은 뒤 새 알림을 표시하고, 일정 알림은 TTL 0으로 push service에 보관하지 않는다.
 
 ### 6.3 RPC, Cron과 Vault
 
 - 서버의 구독 등록·해제·테스트 처리는 제한된 공개 RPC `register_push_subscription`, `unregister_push_subscription`, `get_push_subscription_for_test`를 사용한다.
 - `claim_due_push_notifications`는 활성 약의 활성 일정에 대해 예정 시각부터 5분 간격의 최신 회차를 한국 시각으로 계산하고, 최근 3분 범위의 회차를 중복 없이 발송 대상으로 만든다. 같은 한국 날짜의 일정 기록이 생기거나 날짜가 끝나면 새 회차를 만들지 않는다.
+- `private.push_delivery_is_sendable`은 구독·약·일정 활성 상태, 일정 시각과 회차 정렬, 한국 날짜와 같은 일정 기록 부재를 한 곳에서 검사한다.
+- `prepare_push_delivery_for_send`는 claim 이후 외부 Web Push 직전에 delivery를 잠그고 최신 상태를 다시 확인하며, 취소된 건은 `skipped` 처리하고 발송 payload를 반환하지 않는다.
 - `complete_push_delivery`는 Vercel 발송 결과를 기록하며 만료된 구독을 비활성화할 수 있다.
 - 알림 관련 모든 RPC는 Supabase Vault에 정확히 하나만 존재하는 `push_dispatch_secret`과 일치하는 값이 없으면 실행을 거부한다.
 - Supabase Cron 작업 `medicine-push-dispatch`가 매분 `pg_net`으로 Vault의 발송 URL을 호출한다.

@@ -274,6 +274,25 @@ export type Database = {
           url: string;
         }>;
       };
+      prepare_push_delivery_for_send: {
+        Args: {
+          p_attempt_count: number;
+          p_delivery_id: string;
+          p_dispatch_secret: string;
+          p_now: string;
+        };
+        Returns: Array<{
+          attempt_count: number;
+          auth: string;
+          body: string;
+          delivery_id: string;
+          endpoint: string;
+          p256dh: string;
+          tag: string;
+          title: string;
+          url: string;
+        }>;
+      };
       complete_push_delivery: {
         Args: {
           p_attempt_count: number;

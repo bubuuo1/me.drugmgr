@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   sendNotification,
@@ -95,13 +96,14 @@ function isExpiredSubscriptionStatus(status: number | null): boolean {
 async function deliverPush(
   subscription: WebPushSubscription,
   payload: PushMessagePayload,
-  topic: string
+  topic: string,
+  ttl: number
 ): Promise<number> {
   const result = await sendNotification(subscription, JSON.stringify(payload), {
     vapidDetails: vapidConfiguration(),
-    TTL: 300,
+    TTL: ttl,
     urgency: "high",
-    topic: topic.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32),
+    topic: createHash("sha256").update(topic).digest("base64url").slice(0, 32),
     timeout: 10_000,
   });
   return result.statusCode;
@@ -152,7 +154,8 @@ export async function sendTestPush(value: unknown): Promise<void> {
         url: "/",
         tag: "medicine-push-test",
       },
-      "medicine-push-test"
+      "medicine-push-test",
+      120
     );
   } catch (error) {
     const status = statusCodeOf(error);
@@ -167,7 +170,14 @@ export async function sendTestPush(value: unknown): Promise<void> {
 export async function dispatchDuePushNotifications(
   dispatchSecret: string,
   now = new Date()
-): Promise<{ claimed: number; accepted: number; failed: number; expired: number }> {
+): Promise<{
+  claimed: number;
+  accepted: number;
+  failed: number;
+  expired: number;
+  skipped: number;
+  superseded: number;
+}> {
   const client = pushDatabase();
   const { data, error } = await client.rpc("claim_due_push_notifications", {
     p_dispatch_secret: dispatchSecret,
@@ -176,7 +186,28 @@ export async function dispatchDuePushNotifications(
   if (error) throw new Error(`발송 대상 조회 실패: ${error.message}`);
 
   const results = await Promise.all(
-    data.map(async (item) => {
+    data.map(async (claimedItem) => {
+      const prepared = await client
+        .rpc("prepare_push_delivery_for_send", {
+          p_attempt_count: claimedItem.attempt_count,
+          p_delivery_id: claimedItem.delivery_id,
+          p_dispatch_secret: dispatchSecret,
+          p_now: now.toISOString(),
+        })
+        .maybeSingle();
+      if (prepared.error) {
+        throw new Error(`발송 직전 확인 실패: ${prepared.error.message}`);
+      }
+      if (!prepared.data) {
+        return {
+          success: false,
+          expired: false,
+          skipped: true,
+          superseded: false,
+        };
+      }
+
+      const item = prepared.data;
       let success = false;
       let expired = false;
       let responseStatus: number | null = null;
@@ -191,7 +222,8 @@ export async function dispatchDuePushNotifications(
             url: item.url,
             tag: item.tag,
           },
-          item.delivery_id
+          item.tag,
+          0
         );
         success = true;
       } catch (caught) {
@@ -212,14 +244,21 @@ export async function dispatchDuePushNotifications(
       if (completed.error) {
         throw new Error(`발송 결과 저장 실패: ${completed.error.message}`);
       }
-      return { success, expired };
+      return {
+        success,
+        expired,
+        skipped: false,
+        superseded: completed.data !== true,
+      };
     })
   );
 
   return {
     claimed: data.length,
     accepted: results.filter((result) => result.success).length,
-    failed: results.filter((result) => !result.success).length,
+    failed: results.filter((result) => !result.success && !result.skipped).length,
     expired: results.filter((result) => result.expired).length,
+    skipped: results.filter((result) => result.skipped).length,
+    superseded: results.filter((result) => result.superseded).length,
   };
 }

@@ -220,7 +220,7 @@ export default function RecordsPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-6">
-      <PageHeader title="기록 확인" />
+      <PageHeader title="복용기록 확인" />
 
       {loading && db.medication_logs.length === 0 ? (
         <LoadingState label="투약 기록을 불러오는 중입니다." />
