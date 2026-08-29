@@ -347,7 +347,7 @@ begin
         and candidate.scheduled_for <= bounds.upper_bound
   ),
   inserted as (
-    insert into private.push_deliveries (
+    insert into private.push_deliveries as new_delivery (
       subscription_id,
       schedule_id,
       scheduled_for,
@@ -365,12 +365,12 @@ begin
       from due
     on conflict (subscription_id, schedule_id, scheduled_for) do nothing
     returning
-      id,
-      subscription_id,
-      schedule_id,
-      scheduled_for,
-      status,
-      attempt_count
+      new_delivery.id,
+      new_delivery.subscription_id,
+      new_delivery.schedule_id,
+      new_delivery.scheduled_for,
+      new_delivery.status,
+      new_delivery.attempt_count
   ),
   claimable as (
     select delivery.id
