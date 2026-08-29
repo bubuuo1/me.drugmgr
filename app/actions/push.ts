@@ -8,6 +8,7 @@ import {
   hasRegisteredPushSubscription,
   registerPushSubscription,
   sendTestPush,
+  unregisterAllPushSubscriptions,
   unregisterPushSubscription,
 } from "@/lib/push-server";
 import { createClient } from "@/lib/supabase/server";
@@ -54,6 +55,18 @@ export async function unsubscribeFromPush(
     const client = await authenticatedClient();
     await unregisterPushSubscription(client, careSpaceId, value);
     return { ok: true, message: "선택한 가족 공간의 일정 알림을 껐습니다." };
+  } catch (error) {
+    return { ok: false, message: failureMessage(error) };
+  }
+}
+
+export async function unsubscribeAllFromPush(
+  value: unknown
+): Promise<PushActionResult> {
+  try {
+    const client = await authenticatedClient();
+    await unregisterAllPushSubscriptions(client, value);
+    return { ok: true, message: "이 기기의 모든 가족 알림을 해제했습니다." };
   } catch (error) {
     return { ok: false, message: failureMessage(error) };
   }

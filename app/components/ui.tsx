@@ -22,19 +22,21 @@ export function PageHeader({
   trailing,
 }: PageHeaderProps) {
   return (
-    <header className="flex min-h-14 items-center gap-3 pt-1">
+    <header className="grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 pt-1">
       <Link
         href={backHref}
-        className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-full bg-surface-strong px-4 text-base font-bold text-ink active:bg-hairline-soft"
+        className="inline-flex min-h-12 max-w-full shrink-0 items-center justify-center rounded-full bg-surface-strong px-3 text-base font-bold text-ink active:bg-hairline-soft min-[400px]:px-4"
         aria-label={`${backLabel}으로 이동`}
       >
         <span aria-hidden="true">‹</span>
         <span className="ml-1">{backLabel}</span>
       </Link>
-      <h1 className="min-w-0 flex-1 text-2xl font-bold leading-snug text-ink">
+      <h1 className="min-w-0 break-words text-2xl font-bold leading-snug text-ink">
         {title}
       </h1>
-      {trailing}
+      {trailing && (
+        <div className="col-span-2 min-w-0 justify-self-end">{trailing}</div>
+      )}
     </header>
   );
 }

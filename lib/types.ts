@@ -465,6 +465,10 @@ export type Database = {
         };
         Returns: CareSpaceInvite;
       };
+      claim_care_space_invite_email_send: {
+        Args: { p_dispatch_secret: string; p_invite_id: string };
+        Returns: string;
+      };
       accept_care_space_invite: {
         Args: { p_invite_id: string };
         Returns: CareSpaceMember;
@@ -500,6 +504,14 @@ export type Database = {
         Args: {
           p_auth: string;
           p_care_space_id: string;
+          p_dispatch_secret: string;
+          p_endpoint: string;
+        };
+        Returns: boolean;
+      };
+      unregister_all_push_subscriptions_for_endpoint: {
+        Args: {
+          p_auth: string;
           p_dispatch_secret: string;
           p_endpoint: string;
         };

@@ -3,8 +3,9 @@ import "./globals.css";
 import { ServiceWorkerRegistration } from "./sw-register";
 import { OfflineBanner } from "./offline-banner";
 import { DbProvider } from "@/lib/store";
-import { CareSpaceBar } from "./care-space-bar";
+import { BottomNavigation } from "./bottom-navigation";
 import { CareSpaceBoundary } from "./care-space-boundary";
+import { RecordSubjectBar } from "./record-subject-bar";
 
 export const metadata: Metadata = {
   title: "투약 관리",
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#ff385c",
 };
 
@@ -29,13 +31,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
-      <body className="min-h-screen font-sans antialiased">
-        <OfflineBanner />
+      <body className="min-h-dvh overflow-x-hidden font-sans antialiased">
+        <div className="pt-[env(safe-area-inset-top)]">
+          <OfflineBanner />
+        </div>
         <DbProvider>
-          <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-canvas px-5 pb-8 pt-6">
-            <CareSpaceBar />
+          <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-canvas px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 min-[400px]:px-5 min-[400px]:pt-6">
+            <RecordSubjectBar />
             <CareSpaceBoundary>{children}</CareSpaceBoundary>
           </div>
+          <BottomNavigation />
         </DbProvider>
         <ServiceWorkerRegistration />
       </body>

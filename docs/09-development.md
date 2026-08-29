@@ -12,13 +12,15 @@
 
 Google 로그인 운영 설정은 코드 저장소 밖에서 완료한다.
 
-1. 운영 DB를 백업하고 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`을 적용한다.
+1. 운영 DB를 백업하고 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`을 순서대로 적용한다.
 2. Google Cloud OAuth 동의 화면을 구성하고 웹 애플리케이션 OAuth Client ID/Secret을 만든다.
 3. Google 승인된 redirect URI에 `https://<project-ref>.supabase.co/auth/v1/callback`을 등록한다.
 4. Supabase Authentication > Providers > Google에 Client ID/Secret을 저장하고 공급자를 활성화한다.
 5. Supabase Auth Site URL을 `https://<app>`으로 설정하고 Redirect URLs에 `https://<app>/auth/callback`, `http://localhost:3000/auth/callback`과 실제 사용할 Preview callback을 등록한다.
 6. Google 로그인 후 Supabase Authentication에서 실제 사용자 UUID를 확인하고 미지정 legacy 공간 `00000000-0000-4000-8000-000000000100`에 소유자 멤버십을 수동 지정한다. 첫 로그인 사용자에게 자동 지정하지 않는다.
 7. 사용자 격리와 역할별 거부 테스트를 통과한 뒤 각 사용자가 필요한 복약 공간·기기에서 Push 알림을 다시 켠다.
+
+가족 초대 안내 메일은 Vercel 서버에서 Gmail SMTP로 발송한다. 운영 환경에는 `APP_BASE_URL`, `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`와 선택 항목인 `GMAIL_SMTP_FROM_NAME`을 서버 전용 환경변수로 설정한다. Gmail 계정에는 2단계 인증과 앱 비밀번호가 필요하며 실제 비밀번호나 앱 비밀번호를 Git, `NEXT_PUBLIC_*`, 문서의 예시 값에 기록하지 않는다. DB RPC가 같은 초대의 발송을 1분에 한 번, 수신 주소별 하루 5회, 발신 사용자별 하루 50회, 앱 전체 하루 400회로 제한하며 하루는 한국 날짜를 기준으로 한다.
 
 현재 인증 구현은 브라우저의 실제 origin에 `/auth/callback`을 결합하므로 `NEXT_PUBLIC_SITE_URL` 환경변수를 사용하지 않는다. Google Client Secret을 `.env.local`, Vercel의 `NEXT_PUBLIC_*` 또는 Git에 넣지 않는다.
 
@@ -40,6 +42,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 - [x] 새 사용자의 빈 개인 복약 공간 자동 생성
 - [x] 소유자·보호자·조회자 역할과 `auth.uid()` 기반 RLS
 - [x] 확인된 이메일 기반 초대 생성·수락·거절·취소
+- [x] Gmail SMTP 초대 안내 이메일 발송·재발송과 실패 상태 구분
 - [x] 현재 복약 공간 선택과 공간 전환 시 데이터 격리
 - [x] 사용자·기기·복약 공간별 Push 대상 연결
 - [x] 기존 데이터를 미지정 legacy 공간에 보존
@@ -61,7 +64,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 ### Phase 0.2 Supabase 단일 저장소
 
-- [ ] localStorage·IndexedDB 코드 제거
+- [x] localStorage·IndexedDB 코드 제거
 - [ ] mock 외의 fallback DB 제거
 - [ ] 운영 환경변수 검증
 - [ ] publishable key와 legacy anon key 호환
@@ -141,7 +144,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 - [x] manifest의 앱 id·scope와 홈 화면 아이콘
 - [x] 캐시 없는 push 전용 서비스 워커
-- [x] 설정 화면의 사용자·기기·선택 공간별 알림 켜기·테스트·끄기
+- [x] 환경설정의 사용자·기기·접근 가능 공간별 알림 켜기·테스트·끄기
 - [x] iOS/iPadOS 16.4 이상 홈 화면 설치 안내
 - [x] private 구독·발송 테이블과 제한 RPC
 - [x] Vault 비밀값을 사용하는 Supabase 매분 Cron
@@ -205,6 +208,7 @@ Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용하고 외부 Google/Supab
 - 설정 화면의 알림 상태와 기기별 제어
 - 복약 공간 선택과 역할 표시
 - 가족 초대 생성·수락·거절·취소
+- 가족 초대 안내 이메일 발송 성공·실패와 재발송
 - 조회자의 쓰기 UI 차단과 보호자의 설정 관리 차단
 - 한 약에 두 복용·알림 시간을 추가 버튼 재클릭 없이 연속 저장하고 각각 수정·삭제
 - 비밀값이 없거나 잘못된 Vercel 발송 API 요청 거부
@@ -254,7 +258,7 @@ npx playwright install chromium
 - 발송 API, Supabase 발송 RPC와 Cron 비밀값이 브라우저나 Git 저장소에 노출되지 않음
 - 이미 기록했거나 비활성·삭제된 일정과 중복 발송이 DB 규칙 및 발송 직전 재검증으로 제외됨
 - 기록 전 5분 회차와 한국 날짜 자정 종료가 DB 규칙으로 계산됨
-- 초대 이메일 자동 발송 등 제외 기능을 새 의존성이나 UI로 추가하지 않음
+- 초대 메일 자격 증명이 브라우저나 Git 저장소에 노출되지 않고, 메일 링크만으로 가족 권한이 생기지 않음
 
 ## 8. 명시적 제외
 
@@ -263,7 +267,6 @@ npx playwright install chromium
 - 백업·복원, CSV/PDF
 - 미복용·지연 복용 판정과 알림의 정시·필수 도착 보장
 - 통계·그래프·추이
-- 초대 안내 이메일 자동 발송
 - AI 분석과 의료 판단
 
 위 항목은 개발 backlog가 아니라 현재 제품 범위에서 제외된 결정이다.

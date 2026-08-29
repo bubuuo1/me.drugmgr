@@ -23,6 +23,9 @@ export function LoginButton({ nextPath }: LoginButtonProps) {
         provider: "google",
         options: {
           redirectTo: callbackUrl.toString(),
+          queryParams: {
+            prompt: "select_account",
+          },
         },
       });
 

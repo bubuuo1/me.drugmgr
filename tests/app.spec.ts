@@ -63,7 +63,7 @@ async function finishPossibleDuplicateDialog(page: Page) {
   await expect(savedRegion).toBeVisible();
 }
 
-test("홈에서 빠른 기록, 상태, 복용기록 확인, 설정 진입점이 보인다", async ({
+test("홈에서 빠른 기록, 상태, 복용기록과 모바일 하단 메뉴가 보인다", async ({
   page,
 }) => {
   await page.goto("/");
@@ -96,24 +96,26 @@ test("홈에서 빠른 기록, 상태, 복용기록 확인, 설정 진입점이 
     page.getByRole("link", { name: "복용기록 확인", exact: true })
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "약·일정 관리", exact: true })
+    page.getByRole("link", { name: "환경설정", exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "가족 공간과 계정" })
+  ).toHaveCount(0);
 });
 
 test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 있다", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/settings");
 
-  const spaceNavigation = page.getByRole("navigation", {
-    name: "가족 공간과 계정",
+  const accountSection = page.getByRole("region", {
+    name: "계정과 가족",
   });
-  await expect(spaceNavigation).toContainText("누구의 기록인가요?");
-  await expect(spaceNavigation.getByRole("combobox")).toHaveValue(
+  await expect(accountSection.getByLabel("기록 대상")).toHaveValue(
     "mock-care-space"
   );
-  await spaceNavigation
-    .getByRole("link", { name: "가족 관리", exact: true })
+  await accountSection
+    .getByRole("link", { name: /가족 관리/ })
     .click();
 
   await expect(
@@ -137,13 +139,15 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
 
   const inviteEmail = `family-${runSuffix}@example.com`;
   await page
-    .getByLabel("Google 계정 이메일", { exact: true })
+    .getByLabel("초대할 이메일", { exact: true })
     .fill(inviteEmail);
   await page.getByLabel("권한", { exact: true }).selectOption("viewer");
-  await page.getByRole("button", { name: "초대 만들기", exact: true }).click();
+  await page
+    .getByRole("button", { name: "초대 메일 보내기", exact: true })
+    .click();
 
   await expect(
-    page.getByText(`${inviteEmail} 계정에 보낼 초대를 만들었습니다.`)
+    page.getByText(new RegExp(`${inviteEmail} 주소로 초대 메일을 보냈습니다`))
   ).toBeVisible();
   const inviteRow = page.getByRole("listitem").filter({ hasText: inviteEmail });
   await expect(inviteRow).toContainText("조회 전용");
@@ -169,10 +173,12 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
     });
   });
 
-  const spaceSelect = page
-    .getByRole("navigation", { name: "가족 공간과 계정" })
-    .getByRole("combobox");
+  await page.getByRole("link", { name: "환경설정", exact: true }).click();
+  const spaceSelect = page.getByLabel("기록 대상");
   await spaceSelect.selectOption("mock-second-care-space");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(spaceSelect).toHaveValue("mock-second-care-space");
+  await page.getByRole("link", { name: "첫 화면", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
   await expect(
@@ -193,10 +199,47 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
   );
 });
 
+test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 기록을 우선한다", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const spaceSelect = page.getByLabel("기록 대상");
+  await spaceSelect.selectOption("mock-second-care-space");
+  await expect(spaceSelect).toHaveValue("mock-second-care-space");
+
+  await page.reload();
+  await expect(page.getByLabel("기록 대상")).toHaveValue("mock-care-space");
+
+  await page.goto("/?space=mock-second-care-space");
+  await expect(page.getByRole("complementary", { name: "현재 기록 대상" }))
+    .toContainText("두 번째 복약 공간 · 보호자");
+  await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
+});
+
+test("320px 모바일 화면에서 주요 화면에 가로 스크롤이 생기지 않는다", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+
+  for (const path of ["/", "/records", "/settings", "/family"]) {
+    await page.goto(path);
+    await expect(page.locator("main")).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth
+        )
+      )
+      .toBe(true);
+  }
+});
+
 test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시한다", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/settings");
   await page.getByRole("button", { name: "로그아웃", exact: true }).click();
 
   await expect(page).toHaveURL(/\/login$/);
@@ -204,7 +247,7 @@ test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시�
     page.getByRole("heading", { level: 1, name: "내 기록을 안전하게 이어가세요" })
   ).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "가족 공간과 계정" })
+    page.getByRole("navigation", { name: "주요 메뉴" })
   ).toHaveCount(0);
   await expect(page.getByText("메스티논", { exact: true })).toHaveCount(0);
 });
@@ -317,7 +360,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
 
   await page.goto("/settings");
   await expect(
-    page.getByRole("heading", { level: 1, name: "약과 일정 설정" })
+    page.getByRole("heading", { level: 1, name: "환경설정" })
   ).toBeVisible();
   await expect(
     page.getByText(/처방받은 약 이름, 수량 선택지와 예정 시각/)

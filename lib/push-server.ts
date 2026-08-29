@@ -172,6 +172,24 @@ export async function unregisterPushSubscription(
   if (error) throw new Error(`알림 기기 해제 실패: ${error.message}`);
 }
 
+export async function unregisterAllPushSubscriptions(
+  client: SupabaseClient<Database>,
+  value: unknown
+): Promise<void> {
+  const subscription = validatePushSubscription(value);
+  const { data, error } = await client.rpc(
+    "unregister_all_push_subscriptions_for_endpoint",
+    {
+      p_auth: subscription.keys.auth,
+      p_dispatch_secret: dispatchSecret(),
+      p_endpoint: subscription.endpoint,
+    }
+  );
+  if (error || data !== true) {
+    throw new Error(`알림 기기 전체 해제 실패: ${error?.message ?? "unknown"}`);
+  }
+}
+
 export async function hasRegisteredPushSubscription(
   client: SupabaseClient<Database>,
   careSpaceId: unknown,

@@ -10,14 +10,15 @@
 
 - 접근: Google OAuth 로그인과 서버 측 세션 갱신, 비로그인 사용자의 로그인 화면 이동
 - 격리: 한 사람의 기록을 하나의 복약 공간(`care space`)으로 분리하고 Supabase RLS로 접근 제한
-- 공유: 소유자가 Google 계정 이메일로 보호자 또는 조회자를 초대하고, 초대받은 사용자가 앱 안에서 수락·거절
+- 공유: 소유자가 Gmail·네이버 등 이메일 주소로 보호자 또는 조회자 초대 메일을 보내고, 같은 이메일의 Google 계정으로 로그인한 사용자가 앱 안에서 수락·거절
 - 데이터: 약·일정·투약 로그·하루 상태를 선택한 복약 공간 단위로 조회·저장
 - 기록: 실제 복용 시각·메모, 일정/추가 복용 구분, 수정, soft delete와 실행 취소
-- 알림: 로그인 사용자·기기·복약 공간별 Web Push 구독, 테스트와 해제
+- 알림: 환경설정에서 로그인 사용자·기기·접근 가능 복약 공간별 Web Push 수신, 테스트와 해제
 - 환경: 모바일 우선, 온라인 전용, 한국 날짜(`Asia/Seoul`) 기준
 - 배포: [bubuuo1/me.drugmgr](https://github.com/bubuuo1/me.drugmgr)의 Vercel Git Integration 사용
 
 새 사용자는 기록이 없는 개인 복약 공간을 받습니다. 다른 사람의 기록은 해당 공간에 초대받은 구성원만 볼 수 있습니다.
+앱을 새로 열면 본인이 소유한 복약 공간을 기본 기록 대상으로 사용합니다. 가족 기록 전환, 가족 관리, 가족별 현재 기기 알림과 로그아웃은 모바일 하단의 `환경설정`에서 관리합니다. 알림을 눌러 들어온 명시적 복약 공간 링크는 기본 대상보다 우선합니다.
 
 - `owner`(소유자): 약·일정·구성원·초대를 관리하고 기록을 조회·작성·수정
 - `caregiver`(보호자): 기록을 조회하고 투약 로그·하루 상태를 작성·수정
@@ -34,7 +35,6 @@
 - 백업·복원, CSV/PDF 내보내기
 - 미복용·지연 복용 판정과 알림의 정시 도착 보장
 - 통계·그래프·추이 분석
-- 초대 이메일 자동 발송(초대는 앱 안에서 확인·수락)
 - AI 분석, 의료 판단, 복용량·처방 추천
 
 ## 로컬 실행
@@ -52,6 +52,10 @@ npm ci
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR-PUBLISHABLE-KEY
+APP_BASE_URL=https://me-drugmgr.vercel.app
+GMAIL_SMTP_USER=YOUR-GMAIL-ADDRESS
+GMAIL_SMTP_APP_PASSWORD=YOUR-GMAIL-APP-PASSWORD
+GMAIL_SMTP_FROM_NAME=투약 관리
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=YOUR-PUBLIC-VAPID-KEY
 VAPID_PRIVATE_KEY=YOUR-PRIVATE-VAPID-KEY
 VAPID_SUBJECT=https://YOUR-DEPLOYMENT.example
@@ -60,7 +64,7 @@ PUSH_DISPATCH_SECRET=YOUR-RANDOM-DISPATCH-SECRET
 
 기존 프로젝트가 legacy anon key를 사용하면 `NEXT_PUBLIC_SUPABASE_ANON_KEY`를 호환 변수로 사용할 수 있습니다. publishable/anon 키는 브라우저 공개용이며, service role key는 클라이언트 환경변수에 넣지 않습니다.
 
-VAPID private key와 발송 비밀값은 서버 전용입니다. 운영 환경에서는 Vercel 환경변수에 저장하고, Supabase Vault에는 발송 URL과 같은 `PUSH_DISPATCH_SECRET`을 저장합니다. 알림 발송 스케줄은 Supabase Cron이 매분 Vercel API를 호출합니다.
+Gmail 계정 비밀번호가 아니라 2단계 인증 후 발급한 앱 비밀번호를 사용합니다. Gmail SMTP 값, VAPID private key와 발송 비밀값은 서버 전용입니다. 운영 환경에서는 Vercel 환경변수에 저장하고, Supabase Vault에는 발송 URL과 같은 `PUSH_DISPATCH_SECRET`을 저장합니다. 알림 발송 스케줄은 Supabase Cron이 매분 Vercel API를 호출합니다.
 
 ```bash
 npm run dev
@@ -72,12 +76,12 @@ npm run dev
 
 Google·Supabase 설정과 애플리케이션 배포는 별개의 작업입니다. 특히 새 인증 코드를 커밋·푸시해 Vercel Production 배포를 완료하지 않으면 기존 운영 화면에는 Google 로그인 버튼이 나타나지 않습니다.
 
-1. 운영 Supabase DB를 백업한 뒤 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`을 적용합니다.
+1. 운영 Supabase DB를 백업한 뒤 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`을 순서대로 적용합니다.
 2. 이 저장소의 인증·복약 공간 관련 변경을 함께 커밋하고 GitHub에 푸시합니다. Vercel의 Production 배포가 성공했는지 확인한 뒤, 로그아웃 상태에서 `/` 접속 시 `/login`으로 이동하는지 확인합니다.
 3. Google Cloud에서 외부 사용자용 OAuth 동의 화면과 **웹 애플리케이션** OAuth 클라이언트를 구성합니다. 승인된 JavaScript 원본에는 운영 앱 주소를, 승인된 리디렉션 URI에는 `https://<project-ref>.supabase.co/auth/v1/callback`을 등록합니다.
 4. Supabase Dashboard의 Authentication > Providers > Google에서 Google 공급자를 켜고 Client ID와 Client Secret을 저장합니다. Client Secret은 저장소나 Vercel 공개 환경변수에 넣지 않습니다.
 5. Supabase Authentication의 Site URL을 운영 앱 주소로 설정하고 Redirect URLs에 `https://<app>/auth/callback`과 `http://localhost:3000/auth/callback`을 등록합니다. Preview 배포로 로그인한다면 사용할 Preview 주소도 명시적으로 허용합니다.
-6. Vercel Production 환경에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`(또는 legacy anon key)와 Push 환경변수가 설정되어 있는지 확인하고 변경했다면 다시 배포합니다.
+6. Vercel Production 환경에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`(또는 legacy anon key), Push 환경변수와 초대 메일용 `APP_BASE_URL`, `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`, 선택 항목인 `GMAIL_SMTP_FROM_NAME`을 설정하고 다시 배포합니다.
 7. 운영 주소에서 Google 로그인과 개인 공간 생성을 확인합니다. 인증 도입 전 기록이 있다면 Supabase Authentication에서 실제 소유자의 사용자 UUID를 확인한 뒤 아래 SQL의 `<auth-user-uuid>`를 바꾸어 한 번만 실행합니다.
 
 ```sql
@@ -94,9 +98,23 @@ on conflict (care_space_id, user_id)
 do update set role = 'owner', invited_by = null;
 ```
 
-8. 개인 공간 격리와 가족 초대 권한을 확인한 뒤, 각 사용자가 필요한 복약 공간을 선택해 사용하는 기기마다 알림을 다시 켭니다. 이전 익명 Push 구독은 사용자·공간 구독으로 자동 승격되지 않습니다.
+8. 개인 공간 격리와 가족 초대 권한을 확인한 뒤, 환경설정에서 사용하는 기기마다 필요한 각 가족의 알림을 개별적으로 켭니다. 이전 익명 Push 구독은 사용자·공간 구독으로 자동 승격되지 않습니다.
 
-초대는 확인된 Google 계정 이메일과 일치할 때만 수락할 수 있습니다. 현재 구현은 초대 이메일을 자동 발송하지 않으므로 초대 대상에게 별도로 앱 로그인을 안내합니다.
+초대 메일은 Gmail SMTP에서 Gmail·네이버 등 임의의 수신 주소로 보낼 수 있습니다. 다만 초대는 그 주소와 확인된 이메일이 같은 Google 계정으로 로그인한 사용자가 앱에서 명시적으로 수락해야만 권한으로 전환됩니다. 메일 발송 실패 시 저장된 대기 초대에서 다시 보낼 수 있습니다. 남용 방지를 위해 같은 초대는 1분에 한 번, 수신 주소별 하루 5회, 발신 사용자별 하루 50회, 앱 전체 하루 400회까지만 발송하며 하루 기준은 한국 날짜입니다.
+
+### 배포 후 Gmail SMTP 설정
+
+1. 초대 발송에 사용할 Gmail 또는 Google Workspace 계정에서 2단계 인증을 켭니다.
+2. [Google 앱 비밀번호](https://myaccount.google.com/apppasswords)에서 이 앱용 16자리 앱 비밀번호를 만듭니다. 일반 Google 계정 비밀번호를 사용하지 않습니다.
+3. Vercel 프로젝트의 Settings > Environment Variables에서 Production에 다음 값을 저장합니다.
+   - `APP_BASE_URL=https://me-drugmgr.vercel.app`
+   - `GMAIL_SMTP_USER`: 발송 Gmail 주소
+   - `GMAIL_SMTP_APP_PASSWORD`: 16자리 앱 비밀번호
+   - `GMAIL_SMTP_FROM_NAME=투약 관리`(선택)
+4. 환경변수는 새 배포부터 적용되므로 Production을 다시 배포합니다.
+5. 운영 앱에서 본인 외의 Gmail 주소와 네이버 주소로 각각 초대를 보내 수신함·스팸함, 동일 이메일 Google 로그인, 수락 후 가족 추가까지 확인합니다.
+
+앱 비밀번호는 채팅, 저장소, 화면 캡처에 공유하지 않습니다. 관리형 Workspace 정책, 고급 보호 프로그램 또는 보안 키만 사용하는 2단계 인증에서는 앱 비밀번호 메뉴가 보이지 않을 수 있으므로 해당 계정 관리자 정책을 확인합니다.
 
 ## 품질 검사
 

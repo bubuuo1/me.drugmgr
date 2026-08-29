@@ -8,6 +8,10 @@ drop trigger if exists medicine_app_on_auth_user_created on auth.users;
 drop table if exists private.push_deliveries cascade;
 drop table if exists private.push_subscription_spaces cascade;
 drop table if exists private.push_subscriptions cascade;
+drop table if exists private.care_space_invite_email_recipient_limits cascade;
+drop table if exists private.care_space_invite_email_global_limits cascade;
+drop table if exists private.care_space_invite_email_sender_limits cascade;
+drop table if exists private.care_space_invite_email_limits cascade;
 drop table if exists public.medication_logs cascade;
 drop table if exists public.daily_status cascade;
 drop table if exists public.medication_schedules cascade;
@@ -33,6 +37,8 @@ drop function if exists public.accept_care_space_invite(uuid) cascade;
 drop function if exists public.decline_care_space_invite(uuid) cascade;
 drop function if exists public.revoke_care_space_invite(uuid) cascade;
 drop function if exists public.remove_care_space_member(uuid, uuid) cascade;
+drop function if exists public.claim_care_space_invite_email_send(uuid) cascade;
+drop function if exists public.claim_care_space_invite_email_send(text, uuid) cascade;
 drop function if exists public.register_push_subscription(text, text, text, timestamptz) cascade;
 drop function if exists public.register_push_subscription(text, text, text, text, timestamptz) cascade;
 drop function if exists public.register_push_subscription(
@@ -41,6 +47,9 @@ drop function if exists public.register_push_subscription(
 drop function if exists public.unregister_push_subscription(text) cascade;
 drop function if exists public.unregister_push_subscription(text, text, text) cascade;
 drop function if exists public.unregister_push_subscription(text, uuid, text, text) cascade;
+drop function if exists public.unregister_all_push_subscriptions_for_endpoint(
+  text, text, text
+) cascade;
 drop function if exists public.get_push_subscription_for_test(text, text) cascade;
 drop function if exists public.get_push_subscription_for_test(text, text, text) cascade;
 drop function if exists public.get_push_subscription_for_test(text, uuid, text, text) cascade;
@@ -335,6 +344,43 @@ create table public.daily_status (
 
 create index daily_status_care_space_date_idx
   on public.daily_status (care_space_id, date desc);
+
+create table private.care_space_invite_email_limits (
+  invite_id uuid primary key
+    references public.care_space_invites(id) on delete cascade,
+  last_claimed_at timestamptz not null
+);
+
+create table private.care_space_invite_email_sender_limits (
+  sender_user_id uuid not null
+    references auth.users(id) on delete cascade,
+  claim_date date not null,
+  claim_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (sender_user_id, claim_date),
+  constraint care_space_invite_email_sender_count_valid
+    check (claim_count between 0 and 50)
+);
+
+create table private.care_space_invite_email_global_limits (
+  claim_date date primary key,
+  claim_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  constraint care_space_invite_email_global_count_valid
+    check (claim_count between 0 and 400)
+);
+
+create table private.care_space_invite_email_recipient_limits (
+  recipient_email text not null,
+  claim_date date not null,
+  claim_count integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (recipient_email, claim_date),
+  constraint care_space_invite_email_recipient_normalized
+    check (recipient_email = lower(btrim(recipient_email))),
+  constraint care_space_invite_email_recipient_count_valid
+    check (claim_count between 0 and 5)
+);
 
 create table private.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
@@ -837,6 +883,10 @@ alter table public.medications enable row level security;
 alter table public.medication_schedules enable row level security;
 alter table public.medication_logs enable row level security;
 alter table public.daily_status enable row level security;
+alter table private.care_space_invite_email_limits enable row level security;
+alter table private.care_space_invite_email_sender_limits enable row level security;
+alter table private.care_space_invite_email_global_limits enable row level security;
+alter table private.care_space_invite_email_recipient_limits enable row level security;
 alter table private.push_subscriptions enable row level security;
 alter table private.push_subscription_spaces enable row level security;
 alter table private.push_deliveries enable row level security;
@@ -927,6 +977,14 @@ revoke all on table public.medications from anon, authenticated;
 revoke all on table public.medication_schedules from anon, authenticated;
 revoke all on table public.medication_logs from anon, authenticated;
 revoke all on table public.daily_status from anon, authenticated;
+revoke all on table private.care_space_invite_email_limits
+  from public, anon, authenticated;
+revoke all on table private.care_space_invite_email_sender_limits
+  from public, anon, authenticated;
+revoke all on table private.care_space_invite_email_global_limits
+  from public, anon, authenticated;
+revoke all on table private.care_space_invite_email_recipient_limits
+  from public, anon, authenticated;
 revoke all on table private.push_subscriptions from public, anon, authenticated;
 revoke all on table private.push_subscription_spaces from public, anon, authenticated;
 revoke all on table private.push_deliveries from public, anon, authenticated;
@@ -998,6 +1056,10 @@ grant all on table public.medications to service_role;
 grant all on table public.medication_schedules to service_role;
 grant all on table public.medication_logs to service_role;
 grant all on table public.daily_status to service_role;
+grant all on table private.care_space_invite_email_limits to service_role;
+grant all on table private.care_space_invite_email_sender_limits to service_role;
+grant all on table private.care_space_invite_email_global_limits to service_role;
+grant all on table private.care_space_invite_email_recipient_limits to service_role;
 grant all on table private.push_subscriptions to service_role;
 grant all on table private.push_subscription_spaces to service_role;
 grant all on table private.push_deliveries to service_role;
@@ -2101,6 +2163,237 @@ grant execute on function public.prepare_push_delivery_for_send(
 grant execute on function public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) to anon;
+
+create or replace function public.claim_care_space_invite_email_send(
+  p_dispatch_secret text,
+  p_invite_id uuid
+)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  caller_id uuid := (select auth.uid());
+  selected_invite public.care_space_invites;
+  selected_day date := (now() at time zone 'Asia/Seoul')::date;
+  global_count integer;
+  sender_count integer;
+  recipient_count integer;
+  last_claimed_at timestamptz;
+begin
+  if caller_id is null then
+    raise insufficient_privilege using message = 'authentication required';
+  end if;
+  if not private.push_dispatch_secret_matches(p_dispatch_secret) then
+    raise insufficient_privilege using message = 'invalid invite dispatch secret';
+  end if;
+  if not exists (
+    select 1
+      from auth.users as app_user
+      where app_user.id = caller_id
+        and app_user.is_anonymous is false
+        and app_user.email_confirmed_at is not null
+  ) then
+    raise insufficient_privilege using message = 'verified permanent user required';
+  end if;
+
+  select invite.* into selected_invite
+    from public.care_space_invites as invite
+    where invite.id = p_invite_id
+    for update;
+
+  if not found
+    or selected_invite.invited_by <> caller_id
+    or not private.is_care_space_owner(selected_invite.care_space_id)
+  then
+    raise insufficient_privilege using message = 'care space owner required';
+  end if;
+  if selected_invite.status <> 'pending' then
+    return 'not_pending';
+  end if;
+  if selected_invite.expires_at <= now() then
+    return 'expired';
+  end if;
+
+  insert into private.care_space_invite_email_global_limits (
+    claim_date,
+    claim_count
+  ) values (
+    selected_day,
+    0
+  )
+  on conflict (claim_date) do nothing;
+
+  select global_limit.claim_count into global_count
+    from private.care_space_invite_email_global_limits as global_limit
+    where global_limit.claim_date = selected_day
+    for update;
+
+  insert into private.care_space_invite_email_sender_limits (
+    sender_user_id,
+    claim_date,
+    claim_count
+  ) values (
+    caller_id,
+    selected_day,
+    0
+  )
+  on conflict (sender_user_id, claim_date) do nothing;
+
+  select sender_limit.claim_count into sender_count
+    from private.care_space_invite_email_sender_limits as sender_limit
+    where sender_limit.sender_user_id = caller_id
+      and sender_limit.claim_date = selected_day
+    for update;
+
+  insert into private.care_space_invite_email_recipient_limits (
+    recipient_email,
+    claim_date,
+    claim_count
+  ) values (
+    selected_invite.email,
+    selected_day,
+    0
+  )
+  on conflict (recipient_email, claim_date) do nothing;
+
+  select recipient_limit.claim_count into recipient_count
+    from private.care_space_invite_email_recipient_limits as recipient_limit
+    where recipient_limit.recipient_email = selected_invite.email
+      and recipient_limit.claim_date = selected_day
+    for update;
+
+  select invite_limit.last_claimed_at into last_claimed_at
+    from private.care_space_invite_email_limits as invite_limit
+    where invite_limit.invite_id = p_invite_id;
+
+  if last_claimed_at is not null
+    and last_claimed_at > now() - interval '1 minute'
+  then
+    return 'cooldown';
+  end if;
+  if global_count >= 400 then
+    return 'global_limit';
+  end if;
+  if sender_count >= 50 then
+    return 'daily_limit';
+  end if;
+  if recipient_count >= 5 then
+    return 'recipient_limit';
+  end if;
+
+  insert into private.care_space_invite_email_limits (
+    invite_id,
+    last_claimed_at
+  ) values (
+    p_invite_id,
+    now()
+  )
+  on conflict (invite_id) do update
+    set last_claimed_at = excluded.last_claimed_at;
+
+  update private.care_space_invite_email_global_limits as global_limit
+    set claim_count = global_limit.claim_count + 1,
+        updated_at = now()
+    where global_limit.claim_date = selected_day;
+
+  update private.care_space_invite_email_sender_limits as sender_limit
+    set claim_count = sender_limit.claim_count + 1,
+        updated_at = now()
+    where sender_limit.sender_user_id = caller_id
+      and sender_limit.claim_date = selected_day;
+
+  update private.care_space_invite_email_recipient_limits as recipient_limit
+    set claim_count = recipient_limit.claim_count + 1,
+        updated_at = now()
+    where recipient_limit.recipient_email = selected_invite.email
+      and recipient_limit.claim_date = selected_day;
+
+  delete from private.care_space_invite_email_global_limits as global_limit
+    where global_limit.claim_date < selected_day - 31;
+  delete from private.care_space_invite_email_sender_limits as sender_limit
+    where sender_limit.claim_date < selected_day - 31;
+  delete from private.care_space_invite_email_recipient_limits as recipient_limit
+    where recipient_limit.claim_date < selected_day - 31;
+
+  return 'claimed';
+end;
+$$;
+
+revoke all on function public.claim_care_space_invite_email_send(text, uuid)
+  from public, anon, authenticated;
+grant execute on function public.claim_care_space_invite_email_send(text, uuid)
+  to authenticated;
+
+create or replace function public.unregister_all_push_subscriptions_for_endpoint(
+  p_dispatch_secret text,
+  p_endpoint text,
+  p_auth text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller_id uuid := (select auth.uid());
+  selected_subscription_id uuid;
+begin
+  if caller_id is null then
+    raise insufficient_privilege using message = 'authentication required';
+  end if;
+  if not private.push_dispatch_secret_matches(p_dispatch_secret) then
+    raise insufficient_privilege using message = 'invalid push dispatch secret';
+  end if;
+  if p_endpoint is null
+    or char_length(p_endpoint) not between 1 and 2048
+    or octet_length(p_endpoint) > 2048
+  then
+    raise check_violation using message = 'invalid push endpoint';
+  end if;
+  if p_auth is null
+    or char_length(p_auth) not between 8 and 512
+  then
+    raise check_violation using message = 'invalid auth key';
+  end if;
+
+  select subscription.id into selected_subscription_id
+    from private.push_subscriptions as subscription
+    where subscription.user_id = caller_id
+      and subscription.endpoint = p_endpoint
+      and subscription.auth = p_auth
+    for update;
+
+  if not found then
+    return true;
+  end if;
+
+  delete from private.push_subscription_spaces as target
+    where target.subscription_id = selected_subscription_id
+      and target.user_id = caller_id;
+
+  update private.push_subscriptions as subscription
+    set user_id = null,
+        disabled_at = coalesce(subscription.disabled_at, now())
+    where subscription.id = selected_subscription_id
+      and subscription.user_id = caller_id;
+
+  return true;
+end;
+$$;
+
+revoke all on function public.unregister_all_push_subscriptions_for_endpoint(
+  text,
+  text,
+  text
+) from public, anon, authenticated;
+grant execute on function public.unregister_all_push_subscriptions_for_endpoint(
+  text,
+  text,
+  text
+) to authenticated;
 
 do $$
 declare

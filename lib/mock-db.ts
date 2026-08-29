@@ -74,7 +74,7 @@ const careSpaceMembers: CareSpaceMember[] = [
   {
     care_space_id: MOCK_SECOND_CARE_SPACE_ID,
     user_id: MOCK_USER_ID,
-    role: "owner",
+    role: "caregiver",
     invited_by: null,
     created_at: SEED_TIME,
     updated_at: SEED_TIME,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { sendCareSpaceInviteEmail } from "@/app/actions/family";
 import {
   ConfirmDialog,
   ErrorBanner,
@@ -84,7 +85,16 @@ export default function FamilyPage() {
     try {
       const invite = await createCareSpaceInvite({ email, role });
       setEmail("");
-      setMessage(`${invite.email} 계정에 보낼 초대를 만들었습니다.`);
+      const delivery = await sendCareSpaceInviteEmail(invite.id);
+      if (delivery.ok) {
+        setMessage(
+          `${invite.email} 주소로 초대 메일을 보냈습니다. 상대방이 같은 이메일의 Google 계정으로 로그인해 수락하면 가족으로 추가됩니다.`
+        );
+      } else {
+        setLocalError(
+          `초대는 저장했지만 ${delivery.message} 응답 대기 목록에서 다시 보낼 수 있습니다.`
+        );
+      }
     } catch (caught) {
       setLocalError(errorMessage(caught));
     } finally {
@@ -129,6 +139,26 @@ export default function FamilyPage() {
     }
   }
 
+  async function resendInvite(inviteId: string) {
+    if (!online || pendingAction) return;
+    setPendingAction(`email-${inviteId}`);
+    setLocalError(null);
+    setMessage(null);
+    clearError();
+    try {
+      const delivery = await sendCareSpaceInviteEmail(inviteId);
+      if (!delivery.ok) {
+        setLocalError(delivery.message);
+        return;
+      }
+      setMessage(delivery.message);
+    } catch (caught) {
+      setLocalError(errorMessage(caught));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function confirmMemberRemoval() {
     if (!removeCandidate || !online || pendingAction) return;
     setPendingAction(removeCandidate.user_id);
@@ -150,7 +180,11 @@ export default function FamilyPage() {
   if (loading && !selectedCareSpace) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="가족 공유" />
+        <PageHeader
+          title="가족 공유"
+          backHref="/settings"
+          backLabel="환경설정"
+        />
         <LoadingState label="가족 공간을 불러오는 중입니다." />
       </main>
     );
@@ -158,7 +192,11 @@ export default function FamilyPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-7">
-      <PageHeader title="가족 공유" />
+      <PageHeader
+        title="가족 공유"
+        backHref="/settings"
+        backLabel="환경설정"
+      />
 
       <ErrorBanner
         message={localError ?? error}
@@ -279,15 +317,15 @@ export default function FamilyPage() {
                 가족 초대
               </h2>
               <p className="mt-2 text-base leading-relaxed text-body">
-                상대방이 Google 로그인에 사용하는 이메일을 입력하세요. 초대는
-                그 계정으로 로그인했을 때 이 화면에 표시됩니다.
+                Gmail·네이버 등 메일을 받을 주소를 입력하세요. 상대방은 같은
+                주소로 만든 Google 계정으로 로그인한 뒤 직접 수락해야 합니다.
               </p>
               <form className="mt-5 flex flex-col gap-4" onSubmit={submitInvite}>
                 <label
                   htmlFor="family-invite-email"
                   className="text-base font-bold text-body"
                 >
-                  Google 계정 이메일
+                  초대할 이메일
                 </label>
                 <input
                   id="family-invite-email"
@@ -326,7 +364,7 @@ export default function FamilyPage() {
                   disabled={!online || pendingAction !== null}
                   className="min-h-14 rounded-xl bg-primary-active px-5 text-lg font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
                 >
-                  {pendingAction === "invite" ? "초대 만드는 중" : "초대 만들기"}
+                  {pendingAction === "invite" ? "초대 보내는 중" : "초대 메일 보내기"}
                 </button>
               </form>
 
@@ -335,10 +373,7 @@ export default function FamilyPage() {
                   <h3 className="text-lg font-bold text-ink">응답 대기 중</h3>
                   <ul className="mt-3 flex flex-col gap-3">
                     {activeInvites.map((invite) => (
-                      <li
-                        key={invite.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3"
-                      >
+                      <li key={invite.id} className="rounded-xl bg-surface-soft px-4 py-3">
                         <div className="min-w-0">
                           <p className="break-all text-base font-bold text-ink">
                             {invite.email}
@@ -347,14 +382,26 @@ export default function FamilyPage() {
                             {roleLabel(invite.role)} · {formattedExpiry(invite.expires_at)}까지
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          disabled={!online || pendingAction !== null}
-                          onClick={() => void revokeInvite(invite.id)}
-                          className="min-h-10 rounded-full border border-hairline bg-canvas px-4 text-sm font-bold text-body disabled:bg-surface-strong"
-                        >
-                          {pendingAction === invite.id ? "처리 중" : "초대 취소"}
-                        </button>
+                        <div className="mt-3 grid gap-2 min-[360px]:grid-cols-2">
+                          <button
+                            type="button"
+                            disabled={!online || pendingAction !== null}
+                            onClick={() => void resendInvite(invite.id)}
+                            className="min-h-12 rounded-full border border-ink bg-canvas px-3 text-sm font-bold text-ink disabled:bg-surface-strong"
+                          >
+                            {pendingAction === `email-${invite.id}`
+                              ? "다시 보내는 중"
+                              : "이메일 다시 보내기"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!online || pendingAction !== null}
+                            onClick={() => void revokeInvite(invite.id)}
+                            className="min-h-12 rounded-full border border-hairline bg-canvas px-3 text-sm font-bold text-body disabled:bg-surface-strong"
+                          >
+                            {pendingAction === invite.id ? "처리 중" : "초대 취소"}
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

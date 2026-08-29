@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ConfirmDialog,
@@ -11,6 +10,7 @@ import {
   PageHeader,
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
+import { AccountSettingsCard } from "@/app/settings/account-settings-card";
 import { PushNotificationsCard } from "@/app/settings/push-notifications-card";
 import { dismissScheduleNotifications } from "@/lib/push-client";
 import { useDb } from "@/lib/store";
@@ -319,7 +319,8 @@ export default function SettingsPage() {
   if (loading && medications.length === 0) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="약과 일정 설정" />
+        <PageHeader title="환경설정" />
+        <AccountSettingsCard />
         <LoadingState label="약 설정을 불러오는 중입니다." />
       </main>
     );
@@ -328,24 +329,22 @@ export default function SettingsPage() {
   if (!canManageSettings) {
     return (
       <main className="flex flex-1 flex-col gap-7">
-        <PageHeader title="약과 일정 설정" />
+        <PageHeader title="환경설정" />
+        <AccountSettingsCard />
         <PushNotificationsCard online={online} />
+        <ErrorBanner
+          message={error}
+          onRetry={refresh}
+          onDismiss={clearError}
+        />
         <Notice>
           약과 일정은 이 가족 공간의 소유자만 변경할 수 있습니다. 현재는 등록된
           설정을 조회하고 이 기기의 알림 수신 여부를 관리할 수 있습니다.
         </Notice>
         <section aria-labelledby="medication-list-title" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 id="medication-list-title" className="text-xl font-bold text-ink">
-              등록된 약과 일정
-            </h2>
-            <Link
-              href="/family"
-              className="inline-flex min-h-12 items-center justify-center rounded-full border border-hairline bg-canvas px-4 text-base font-bold text-ink"
-            >
-              가족 권한 보기
-            </Link>
-          </div>
+          <h2 id="medication-list-title" className="text-xl font-bold text-ink">
+            등록된 약과 일정
+          </h2>
           {medications.length === 0 ? (
             <p className="rounded-2xl border border-hairline px-5 py-5 text-lg text-muted">
               등록된 약이 없습니다.
@@ -404,12 +403,13 @@ export default function SettingsPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-7">
-      <PageHeader title="약과 일정 설정" />
+      <PageHeader title="환경설정" />
 
+      <AccountSettingsCard />
       <PushNotificationsCard online={online} />
 
       {loading && (
-        <p role="status" className="text-center text-base font-semibold text-body">
+        <p role="status" className="sr-only">
           최신 설정을 확인하고 있습니다.
         </p>
       )}

@@ -32,6 +32,10 @@ Web Push에서 `NEXT_PUBLIC_VAPID_PUBLIC_KEY`는 브라우저에 공개해도 �
 
 이 기능은 service role key를 사용하지 않는다. Supabase Cron의 요청과 Vercel 발송 API, 발송용 RPC는 `PUSH_DISPATCH_SECRET`으로 연결한다.
 
+로그아웃할 때는 현재 기기의 모든 가족별 Push 대상 행을 삭제하고 구독 endpoint의 사용자 소유권을 해제한다. 브라우저 구독 해제가 실패해도 다음 로그인 사용자가 같은 endpoint를 안전하게 다시 등록할 수 있다.
+
+가족 초대 메일의 `GMAIL_SMTP_USER`, `GMAIL_SMTP_APP_PASSWORD`와 선택 항목인 `GMAIL_SMTP_FROM_NAME`도 Vercel 서버 전용 환경변수다. 앱 비밀번호는 코드, Git, 로그, `NEXT_PUBLIC_*`에 넣지 않는다. 메일 링크는 가족 권한 토큰이 아니며, 로그인 세션의 확인된 이메일과 대기 초대가 일치한 사용자가 앱에서 직접 수락해야만 DB 멤버십을 만든다. 발송 quota RPC는 서버 전용 `PUSH_DISPATCH_SECRET`을 검증하고 익명·이메일 미확인 사용자를 거부한다. 발송 권한은 DB가 소유자와 대기 초대를 다시 확인하고, 같은 초대는 1분에 한 번, 수신 주소별 하루 5회, 발신 사용자별 하루 50회, 앱 전체 하루 400회까지만 원자적으로 허용한다. 하루 기준은 한국 날짜다.
+
 ## 3. RLS와 역할 권한
 
 모든 공개 앱 테이블은 RLS를 활성화하고 `anon`에는 앱 데이터 권한을 주지 않는다. `authenticated`에도 필요한 테이블·컬럼 권한과 정책만 명시적으로 부여한다.
@@ -109,7 +113,6 @@ Playwright mock DB도 테스트 프로세스의 메모리에만 존재하고 실
 
 - 비밀번호·SMS 로그인과 자체 계정 복구
 - 접근 코드와 승인 기기 목록
-- 초대 안내 이메일 자동 발송
 - 로컬 암호화 건강 데이터 저장소
 - 애플리케이션 내 백업·복원
 

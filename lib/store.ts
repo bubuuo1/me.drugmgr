@@ -43,8 +43,6 @@ const EMPTY_DB: DB = {
   daily_status: [],
 };
 
-const SELECTED_CARE_SPACE_STORAGE_KEY = "medicine:selected-care-space";
-
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -56,6 +54,48 @@ let repositoryGeneration = 0;
 class StaleRepositoryOperationError extends Error {
   constructor() {
     super("로그아웃되어 진행 중인 데이터 요청을 취소했습니다.");
+  }
+}
+
+class DataRequestCoordinator {
+  private selectedCareSpaceId: string | null = null;
+  private generation = 0;
+  private selectionGeneration = 0;
+
+  begin(): number {
+    this.generation += 1;
+    return this.generation;
+  }
+
+  isCurrent(generation: number): boolean {
+    return generation === this.generation;
+  }
+
+  selectedId(): string | null {
+    return this.selectedCareSpaceId;
+  }
+
+  select(id: string | null): void {
+    if (id !== this.selectedCareSpaceId) {
+      this.selectionGeneration += 1;
+    }
+    this.selectedCareSpaceId = id;
+  }
+
+  selectionSnapshot(): number {
+    return this.selectionGeneration;
+  }
+
+  isSelected(id: string, selectionGeneration: number): boolean {
+    return (
+      this.selectedCareSpaceId === id &&
+      this.selectionGeneration === selectionGeneration
+    );
+  }
+
+  clear(): void {
+    this.generation += 1;
+    this.select(null);
   }
 }
 
@@ -158,6 +198,18 @@ function replaceRow<T extends { id: string }>(rows: T[], row: T): T[] {
     : [...rows, row];
 }
 
+function preferredCareSpace(
+  spaces: CareSpaceAccess[],
+  preferredId: string | null
+): CareSpaceAccess | null {
+  return (
+    spaces.find((space) => space.id === preferredId) ??
+    spaces.find((space) => space.role === "owner") ??
+    spaces[0] ??
+    null
+  );
+}
+
 function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -241,6 +293,7 @@ export function DbProvider({ children }: PropsWithChildren) {
   const [selectedCareSpaceId, setSelectedCareSpaceId] = useState<string | null>(
     null
   );
+  const [dataRequests] = useState(() => new DataRequestCoordinator());
   const [careSpaceMembersBySpace, setCareSpaceMembersBySpace] = useState<
     Record<string, CareSpaceMemberWithProfile[]>
   >({});
@@ -343,63 +396,68 @@ export function DbProvider({ children }: PropsWithChildren) {
       const space = careSpaces.find((candidate) => candidate.id === id);
       if (!space) throw new Error("접근할 수 없는 가족 공간입니다.");
 
+      const requestGeneration = dataRequests.begin();
+      dataRequests.select(space.id);
       setSelectedCareSpaceId(space.id);
       setDb(EMPTY_DB);
-      try {
-        globalThis.localStorage.setItem(
-          SELECTED_CARE_SPACE_STORAGE_KEY,
-          space.id
-        );
-      } catch {
-        // The preference is optional; the selected space remains in memory.
-      }
 
       const next = await run(() => repository.fetchAll(space.id));
+      if (!dataRequests.isCurrent(requestGeneration)) return;
       setDb(next);
     },
-    [careSpaces, run]
+    [careSpaces, dataRequests, run]
   );
 
   const refreshCareSpaces = useCallback(async () => {
-    const preferredId = selectedCareSpaceId;
+    const preferredId = dataRequests.selectedId();
+    const requestGeneration = dataRequests.begin();
     const result = await run(async () => {
       const [spaces, pendingInvites] = await Promise.all([
         repository.fetchCareSpaces(),
         repository.fetchPendingCareSpaceInvites(),
       ]);
-      const selected =
-        spaces.find((space) => space.id === preferredId) ?? spaces[0] ?? null;
+      const selected = preferredCareSpace(spaces, preferredId);
       const next = selected ? await repository.fetchAll(selected.id) : EMPTY_DB;
       return { spaces, pendingInvites, selected, next };
     });
 
+    if (!dataRequests.isCurrent(requestGeneration)) return;
+    dataRequests.select(result.selected?.id ?? null);
     setCareSpaces(result.spaces);
     setPendingCareSpaceInvites(result.pendingInvites);
     setSelectedCareSpaceId(result.selected?.id ?? null);
     setCareSpaceMembersBySpace({});
     setCareSpaceInvitesBySpace({});
     setDb(result.next);
-  }, [run, selectedCareSpaceId]);
+  }, [dataRequests, run]);
 
   const revalidateAccessibleSpaces = useCallback(async () => {
-    const preferredId = selectedCareSpaceId;
+    const preferredId = dataRequests.selectedId();
+    const requestGeneration = dataRequests.begin();
     const result = await run(async () => {
-      const spaces = await repository.fetchCareSpaces();
-      const selected =
-        spaces.find((space) => space.id === preferredId) ?? spaces[0] ?? null;
+      const [spaces, pendingInvites] = await Promise.all([
+        repository.fetchCareSpaces(),
+        repository.fetchPendingCareSpaceInvites(),
+      ]);
+      const selected = preferredCareSpace(spaces, preferredId);
       const next = selected ? await repository.fetchAll(selected.id) : EMPTY_DB;
-      return { spaces, selected, next };
+      return { spaces, pendingInvites, selected, next };
     });
+    if (!dataRequests.isCurrent(requestGeneration)) return;
+    dataRequests.select(result.selected?.id ?? null);
     setCareSpaces(result.spaces);
+    setPendingCareSpaceInvites(result.pendingInvites);
     setSelectedCareSpaceId(result.selected?.id ?? null);
     setDb(result.next);
-  }, [run, selectedCareSpaceId]);
+  }, [dataRequests, run]);
 
   const refresh = useCallback(async () => {
     const space = requireSelectedCareSpace();
+    const requestGeneration = dataRequests.begin();
     const next = await run(() => repository.fetchAll(space.id));
+    if (!dataRequests.isCurrent(requestGeneration)) return;
     setDb(next);
-  }, [requireSelectedCareSpace, run]);
+  }, [dataRequests, requireSelectedCareSpace, run]);
 
   useEffect(() => {
     const pathname = globalThis.location.pathname;
@@ -420,16 +478,12 @@ export function DbProvider({ children }: PropsWithChildren) {
 
     let cancelled = false;
     const generation = repositoryGeneration;
+    const dataRequestGeneration = dataRequests.begin();
     let preferredId: string | null = null;
     try {
-      const linkedSpaceId = new URL(globalThis.location.href).searchParams.get(
-        "space"
-      );
-      preferredId =
-        linkedSpaceId ??
-        globalThis.localStorage.getItem(SELECTED_CARE_SPACE_STORAGE_KEY);
+      preferredId = new URL(globalThis.location.href).searchParams.get("space");
     } catch {
-      // Falling back to the first accessible space is safe.
+      // Falling back to the owner's space is safe.
     }
 
     void Promise.all([
@@ -437,24 +491,20 @@ export function DbProvider({ children }: PropsWithChildren) {
       repository.fetchPendingCareSpaceInvites(),
     ])
       .then(async ([spaces, pendingInvites]) => {
-        const selected =
-          spaces.find((space) => space.id === preferredId) ?? spaces[0] ?? null;
+        const selected = preferredCareSpace(spaces, preferredId);
         const next = selected ? await repository.fetchAll(selected.id) : EMPTY_DB;
-        if (cancelled || generation !== repositoryGeneration) return;
+        if (
+          cancelled ||
+          generation !== repositoryGeneration ||
+          !dataRequests.isCurrent(dataRequestGeneration)
+        ) {
+          return;
+        }
+        dataRequests.select(selected?.id ?? null);
         setCareSpaces(spaces);
         setPendingCareSpaceInvites(pendingInvites);
         setSelectedCareSpaceId(selected?.id ?? null);
         setDb(next);
-        if (selected) {
-          try {
-            globalThis.localStorage.setItem(
-              SELECTED_CARE_SPACE_STORAGE_KEY,
-              selected.id
-            );
-          } catch {
-            // The preference is optional.
-          }
-        }
       })
       .catch((reason: unknown) => {
         if (!cancelled && generation === repositoryGeneration) {
@@ -470,18 +520,23 @@ export function DbProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataRequests]);
 
   const refreshFamily = useCallback(async () => {
     const space = requireSelectedCareSpace();
+    const selectionGeneration = dataRequests.selectionSnapshot();
     const result = await run(async () => {
-      const members = await repository.fetchCareSpaceMembers(space.id);
-      const invites =
+      const [members, invites, pendingInvites] = await Promise.all([
+        repository.fetchCareSpaceMembers(space.id),
         space.role === "owner"
-          ? await repository.fetchCareSpaceInvites(space.id)
-          : [];
-      return { members, invites };
+          ? repository.fetchCareSpaceInvites(space.id)
+          : Promise.resolve([]),
+        repository.fetchPendingCareSpaceInvites(),
+      ]);
+      return { members, invites, pendingInvites };
     });
+    if (!dataRequests.isSelected(space.id, selectionGeneration)) return;
+    setPendingCareSpaceInvites(result.pendingInvites);
     setCareSpaceMembersBySpace((current) => ({
       ...current,
       [space.id]: result.members,
@@ -490,24 +545,27 @@ export function DbProvider({ children }: PropsWithChildren) {
       ...current,
       [space.id]: result.invites,
     }));
-  }, [requireSelectedCareSpace, run]);
+  }, [dataRequests, requireSelectedCareSpace, run]);
 
   const createCareSpaceInvite = useCallback(
     async (input: CreateCareSpaceInviteInput) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() =>
         repository.createCareSpaceInvite(
           space.id,
           normalizedInviteInput(input)
         )
       );
-      setCareSpaceInvitesBySpace((current) => ({
-        ...current,
-        [space.id]: replaceRow(current[space.id] ?? [], row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setCareSpaceInvitesBySpace((current) => ({
+          ...current,
+          [space.id]: replaceRow(current[space.id] ?? [], row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const acceptCareSpaceInvite = useCallback(
@@ -534,33 +592,40 @@ export function DbProvider({ children }: PropsWithChildren) {
   const revokeCareSpaceInvite = useCallback(
     async (inviteId: string) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() => repository.revokeCareSpaceInvite(inviteId));
-      setCareSpaceInvitesBySpace((current) => ({
-        ...current,
-        [space.id]: replaceRow(current[space.id] ?? [], row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setCareSpaceInvitesBySpace((current) => ({
+          ...current,
+          [space.id]: replaceRow(current[space.id] ?? [], row),
+        }));
+      }
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const removeCareSpaceMember = useCallback(
     async (userId: string) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const removed = await run(() =>
         repository.removeCareSpaceMember(space.id, userId)
       );
-      setCareSpaceMembersBySpace((current) => ({
-        ...current,
-        [space.id]: (current[space.id] ?? []).filter(
-          (member) => member.user_id !== removed.user_id
-        ),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setCareSpaceMembersBySpace((current) => ({
+          ...current,
+          [space.id]: (current[space.id] ?? []).filter(
+            (member) => member.user_id !== removed.user_id
+          ),
+        }));
+      }
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const purgeSensitiveState = useCallback(() => {
     repositoryGeneration += 1;
+    dataRequests.clear();
     setPrivacyLocked(true);
     setDb(EMPTY_DB);
     setCareSpaces([]);
@@ -571,12 +636,7 @@ export function DbProvider({ children }: PropsWithChildren) {
     setPendingCount(0);
     setInitialized(false);
     setError(null);
-    try {
-      globalThis.localStorage.removeItem(SELECTED_CARE_SPACE_STORAGE_KEY);
-    } catch {
-      // The preference may be unavailable or already cleared.
-    }
-  }, []);
+  }, [dataRequests]);
 
   useEffect(() => {
     if (isMockDbEnabled || !supabase) return;
@@ -624,6 +684,7 @@ export function DbProvider({ children }: PropsWithChildren) {
   const addMedication = useCallback(
     async (input: AddMedicationInput) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const prepared: AddMedicationInput = {
         name: assertNonEmpty(input.name, "약 이름", 100),
         unit: normalizedUnit(input.unit),
@@ -631,18 +692,21 @@ export function DbProvider({ children }: PropsWithChildren) {
         active: input.active ?? true,
       };
       const row = await run(() => repository.addMedication(space.id, prepared));
-      setDb((current) => ({
-        ...current,
-        medications: replaceRow(current.medications, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medications: replaceRow(current.medications, row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const updateMedication = useCallback(
     async (id: string, patch: UpdateMedicationInput) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const prepared: UpdateMedicationInput = {
         ...patch,
@@ -659,51 +723,60 @@ export function DbProvider({ children }: PropsWithChildren) {
       const row = await run(() =>
         repository.updateMedication(space.id, id, prepared)
       );
-      setDb((current) => ({
-        ...current,
-        medications: replaceRow(current.medications, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medications: replaceRow(current.medications, row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const deactivateMedication = useCallback(
     async (id: string) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() =>
         repository.deactivateMedication(space.id, id)
       );
-      setDb((current) => ({
-        ...current,
-        medications: replaceRow(current.medications, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medications: replaceRow(current.medications, row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const addSchedule = useCallback(
     async (input: AddScheduleInput) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const prepared: AddScheduleInput = {
         medication_id: input.medication_id,
         time: normalizedTime(input.time),
         active: input.active ?? true,
       };
       const row = await run(() => repository.addSchedule(space.id, prepared));
-      setDb((current) => ({
-        ...current,
-        medication_schedules: replaceRow(current.medication_schedules, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_schedules: replaceRow(current.medication_schedules, row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const updateSchedule = useCallback(
     async (id: string, patch: UpdateScheduleInput) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const prepared: UpdateScheduleInput = {
         ...patch,
@@ -712,32 +785,38 @@ export function DbProvider({ children }: PropsWithChildren) {
       const row = await run(() =>
         repository.updateSchedule(space.id, id, prepared)
       );
-      setDb((current) => ({
-        ...current,
-        medication_schedules: replaceRow(current.medication_schedules, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_schedules: replaceRow(current.medication_schedules, row),
+        }));
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const deleteSchedule = useCallback(
     async (id: string) => {
       const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const { row, next } = await run(async () => {
         const deleted = await repository.deleteSchedule(space.id, id);
         const refreshed = await repository.fetchAll(space.id);
         return { row: deleted, next: refreshed };
       });
-      setDb(next);
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb(next);
+      }
       return row;
     },
-    [requireOwnerSpace, run]
+    [dataRequests, requireOwnerSpace, run]
   );
 
   const addLog = useCallback(
     async (input: AddMedicationLogInput) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const scheduleId = input.schedule_id ?? null;
       const expectedExtra = scheduleId === null;
       const isExtra = input.is_extra ?? expectedExtra;
@@ -768,18 +847,21 @@ export function DbProvider({ children }: PropsWithChildren) {
           toDateKey(new Date(row.taken_at))
         );
       }
-      setDb((current) => ({
-        ...current,
-        medication_logs: replaceRow(current.medication_logs, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_logs: replaceRow(current.medication_logs, row),
+        }));
+      }
       return row;
     },
-    [requireWritableSpace, run]
+    [dataRequests, requireWritableSpace, run]
   );
 
   const updateLog = useCallback(
     async (id: string, patch: UpdateMedicationLogInput) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const currentLog = db.medication_logs.find((log) => log.id === id);
       const finalScheduleId = hasOwn(patch, "schedule_id")
@@ -809,31 +891,37 @@ export function DbProvider({ children }: PropsWithChildren) {
           toDateKey(new Date(row.taken_at))
         );
       }
-      setDb((current) => ({
-        ...current,
-        medication_logs: replaceRow(current.medication_logs, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_logs: replaceRow(current.medication_logs, row),
+        }));
+      }
       return row;
     },
-    [db.medication_logs, requireWritableSpace, run]
+    [dataRequests, db.medication_logs, requireWritableSpace, run]
   );
 
   const softDeleteLog = useCallback(
     async (id: string) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() => repository.softDeleteLog(space.id, id));
-      setDb((current) => ({
-        ...current,
-        medication_logs: replaceRow(current.medication_logs, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_logs: replaceRow(current.medication_logs, row),
+        }));
+      }
       return row;
     },
-    [requireWritableSpace, run]
+    [dataRequests, requireWritableSpace, run]
   );
 
   const restoreLog = useCallback(
     async (id: string) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() => repository.restoreLog(space.id, id));
       if (row.schedule_id) {
         await dismissScheduleNotifications(
@@ -841,42 +929,52 @@ export function DbProvider({ children }: PropsWithChildren) {
           toDateKey(new Date(row.taken_at))
         );
       }
-      setDb((current) => ({
-        ...current,
-        medication_logs: replaceRow(current.medication_logs, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_logs: replaceRow(current.medication_logs, row),
+        }));
+      }
       return row;
     },
-    [requireWritableSpace, run]
+    [dataRequests, requireWritableSpace, run]
   );
 
   const upsertStatus = useCallback(
     async (input: DailyStatusInput) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() =>
         repository.upsertStatus(space.id, validateStatus(input))
       );
-      setDb((current) => ({
-        ...current,
-        daily_status: replaceRow(current.daily_status, row),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          daily_status: replaceRow(current.daily_status, row),
+        }));
+      }
       return row;
     },
-    [requireWritableSpace, run]
+    [dataRequests, requireWritableSpace, run]
   );
 
   const deleteStatus = useCallback(
     async (date: string) => {
       const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
       fromDateKey(date);
       const row = await run(() => repository.deleteStatus(space.id, date));
-      setDb((current) => ({
-        ...current,
-        daily_status: current.daily_status.filter((status) => status.id !== row.id),
-      }));
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          daily_status: current.daily_status.filter(
+            (status) => status.id !== row.id
+          ),
+        }));
+      }
       return row;
     },
-    [requireWritableSpace, run]
+    [dataRequests, requireWritableSpace, run]
   );
 
   const value = useMemo<DbContextValue>(

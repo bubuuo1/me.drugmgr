@@ -99,3 +99,34 @@ export async function dismissScheduleNotifications(
     // Closing an already displayed notification is a best-effort UI cleanup.
   }
 }
+
+export async function dismissCareSpaceNotifications(
+  careSpaceId: string
+): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    if (!registration) return;
+
+    const notifications = await registration.getNotifications();
+    for (const notification of notifications) {
+      const requestedPath = notification.data?.url;
+      if (typeof requestedPath !== "string") continue;
+
+      try {
+        const url = new URL(requestedPath, window.location.origin);
+        if (
+          url.origin === window.location.origin &&
+          url.searchParams.get("space") === careSpaceId
+        ) {
+          notification.close();
+        }
+      } catch {
+        // Ignore malformed notification URLs and continue checking the rest.
+      }
+    }
+  } catch {
+    // Closing already displayed notifications is a best-effort UI cleanup.
+  }
+}
