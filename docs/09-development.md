@@ -121,7 +121,9 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 - [x] Vault 비밀값을 사용하는 Supabase 매분 Cron
 - [x] Vercel 발송 API의 Bearer 비밀값 검증
 - [x] 활성 일정 대상 생성과 이미 기록한 일정 건너뛰기
-- [x] 기기·일정·예정 시각 중복 방지
+- [x] 일정 기록 전까지 한국 날짜 안에서 5분 간격 반복 알림
+- [x] 기기·일정·5분 회차 중복 방지
+- [x] 같은 알림 항목을 갱신하며 재알림·진동 요청
 - [x] 중단·일시 실패 시 5분 이내 최대 3회 재시도와 시도 번호 검증
 - [x] 만료 구독 비활성화와 전송 결과 기록
 - [x] 알림 클릭 시 해당 투약 기록 화면 열기
@@ -159,6 +161,7 @@ Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 
 - 약·일정 설정 후 과거 로그 불변
 - manifest의 PWA id·scope와 push 전용 서비스 워커 제공
 - 서비스 워커에 `push`, `notificationclick`이 있고 앱/API `fetch` 캐시가 없음
+- 서비스 워커에 반복 알림용 `renotify`와 진동 패턴이 있음
 - 설정 화면의 알림 상태와 기기별 제어
 - 비밀값이 없거나 잘못된 Vercel 발송 API 요청 거부
 
@@ -203,6 +206,7 @@ npx playwright install chromium
 - push 서비스 워커가 앱/API 요청을 오프라인 캐시하지 않음
 - 발송 API, Supabase 발송 RPC와 Cron 비밀값이 브라우저나 Git 저장소에 노출되지 않음
 - 이미 기록한 일정과 중복 발송이 DB 규칙으로 제외됨
+- 기록 전 5분 회차와 한국 날짜 자정 종료가 DB 규칙으로 계산됨
 - P0/P1 제외 기능을 새 의존성이나 UI로 추가하지 않음
 
 ## 8. 명시적 제외

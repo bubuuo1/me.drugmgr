@@ -50,6 +50,8 @@ self.addEventListener("push", (event) => {
       body: payload.body,
       icon: payload.icon,
       tag: payload.tag,
+      renotify: true,
+      vibrate: [200, 100, 200],
       data: { url: payload.url },
     })
   );

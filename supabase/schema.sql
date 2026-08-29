@@ -655,32 +655,30 @@ begin
   with bounds as (
     select
       date_trunc('minute', p_now) - interval '3 minutes' as lower_bound,
-      date_trunc('minute', p_now) as upper_bound
+      date_trunc('minute', p_now) as upper_bound,
+      (p_now at time zone 'Asia/Seoul')::date as schedule_date,
+      (
+        ((p_now at time zone 'Asia/Seoul')::date + 1)::timestamp
+      ) at time zone 'Asia/Seoul' as day_ends_at
   ),
-  schedule_dates as (
-    select generated::date as schedule_date
-      from bounds,
-      lateral generate_series(
-        (lower_bound at time zone 'Asia/Seoul')::date,
-        (upper_bound at time zone 'Asia/Seoul')::date,
-        interval '1 day'
-      ) as generated
-  ),
-  candidate_times as (
+  daily_schedules as (
     select
       subscription.id as subscription_id,
       schedule.id as schedule_id,
       schedule.medication_id,
       medication.name as medication_name,
       schedule.time as schedule_time,
-      schedule_date.schedule_date,
+      bounds.schedule_date,
+      bounds.lower_bound,
+      bounds.upper_bound,
+      bounds.day_ends_at,
       (
-        schedule_date.schedule_date + schedule.time
-      ) at time zone 'Asia/Seoul' as scheduled_for
+        bounds.schedule_date + schedule.time
+      ) at time zone 'Asia/Seoul' as first_scheduled_for
       from private.push_subscriptions as subscription
       cross join public.medication_schedules as schedule
       join public.medications as medication on medication.id = schedule.medication_id
-      cross join schedule_dates as schedule_date
+      cross join bounds
       where subscription.disabled_at is null
         and (
           subscription.expiration_time is null
@@ -689,25 +687,40 @@ begin
         and schedule.active
         and medication.active
   ),
-  due as (
+  candidate_times as (
     select
-      candidate.*,
-      exists (
-        select 1
-          from public.medication_logs as log
-          where log.schedule_id = candidate.schedule_id
-            and log.deleted_at is null
-            and log.taken_at >= (
-              candidate.schedule_date::timestamp at time zone 'Asia/Seoul'
-            )
-            and log.taken_at < (
-              (candidate.schedule_date + 1)::timestamp at time zone 'Asia/Seoul'
-            )
-      ) as already_recorded
+      base.subscription_id,
+      base.schedule_id,
+      base.medication_id,
+      base.medication_name,
+      base.schedule_time,
+      base.schedule_date,
+      base.lower_bound,
+      base.upper_bound,
+      base.day_ends_at,
+      base.first_scheduled_for +
+        floor(
+          extract(epoch from (base.upper_bound - base.first_scheduled_for)) / 300
+        )::integer * interval '5 minutes' as scheduled_for
+      from daily_schedules as base
+      where base.first_scheduled_for <= base.upper_bound
+  ),
+  due as (
+    select candidate.*
       from candidate_times as candidate
-      cross join bounds
-      where candidate.scheduled_for >= bounds.lower_bound
-        and candidate.scheduled_for <= bounds.upper_bound
+      where candidate.scheduled_for >= candidate.lower_bound
+        and candidate.scheduled_for <= candidate.upper_bound
+        and candidate.scheduled_for < candidate.day_ends_at
+        and not exists (
+          select 1
+            from public.medication_logs as log
+            where log.schedule_id = candidate.schedule_id
+              and log.deleted_at is null
+              and log.taken_at >= (
+                candidate.schedule_date::timestamp at time zone 'Asia/Seoul'
+              )
+              and log.taken_at < candidate.day_ends_at
+        )
   ),
   inserted as (
     insert into private.push_deliveries as new_delivery (
@@ -722,9 +735,9 @@ begin
       due.subscription_id,
       due.schedule_id,
       due.scheduled_for,
-      case when due.already_recorded then 'skipped' else 'pending' end,
-      case when due.already_recorded then 0 else 1 end,
-      case when due.already_recorded then null else p_now end
+      'pending',
+      1,
+      p_now
       from due
     on conflict (subscription_id, schedule_id, scheduled_for) do nothing
     returning
@@ -749,6 +762,8 @@ begin
         and delivery.scheduled_for >
           bounds.lower_bound - interval '2 minutes'
         and delivery.scheduled_for <= bounds.upper_bound
+        and (delivery.scheduled_for at time zone 'Asia/Seoul')::date =
+          bounds.schedule_date
         and delivery.attempt_count < 3
         and (
           delivery.attempted_at is null

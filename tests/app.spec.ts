@@ -158,6 +158,8 @@ test("서비스 워커는 오프라인 캐시 없이 푸시 알림만 처리한�
   const source = await response.text();
   expect(source).toContain('addEventListener("push"');
   expect(source).toContain('addEventListener("notificationclick"');
+  expect(source).toContain("renotify: true");
+  expect(source).toContain("vibrate: [200, 100, 200]");
   expect(source).not.toContain('addEventListener("fetch"');
 });
 
@@ -169,7 +171,7 @@ test("설정에서 기기 알림을 관리하고 발송 API는 비밀값을 요�
     has: page.getByRole("heading", { level: 2, name: "투약 일정 알림" }),
   });
   await expect(notificationSection).toBeVisible();
-  await expect(notificationSection).toContainText(/일정 알림/);
+  await expect(notificationSection).toContainText("5분마다");
 
   const unauthorized = await page.request.post("/api/push/dispatch", {
     headers: { Authorization: "Bearer wrong-secret" },
