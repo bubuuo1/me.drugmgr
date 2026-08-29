@@ -1,112 +1,186 @@
-# 개발 순서 및 TODO
+# 개발 순서, 테스트, 배포
 
-## Phase 1 - 기본 프로젝트
+## 1. 저장소와 배포
 
-- [ ] Next.js 프로젝트 생성
-- [ ] TypeScript 설정
-- [ ] 모바일 기본 레이아웃
-- [ ] Vercel 연결
-- [ ] Supabase 프로젝트 연결
+- npm package 이름: `me-drugmgr`
+- GitHub: `bubuuo1/me.drugmgr`
+- Node.js: 22
+- 배포: Vercel 프로젝트의 Git Integration
+- GitHub Actions: 품질 검사만 수행, 배포하지 않음
 
-## Phase 2 - 데이터베이스
+새 Vercel 계정에 `me-drugmgr` 프로젝트를 만들고 `bubuuo1/me.drugmgr`를 Git Integration으로 연결해 Preview/Production 배포 흐름을 사용한다.
 
-- [ ] medications 테이블
-- [ ] medication_schedules 테이블
-- [ ] medication_logs 테이블
-- [ ] daily_status 테이블
-- [ ] 인덱스 생성
-- [ ] RLS 정책 설계
+## 2. P0 — 데이터 정확성과 운영 기반
 
-## Phase 3 - 첫 화면
+### Phase 0.1 스키마 reset
 
-- [ ] 메스티논 기록 버튼
-- [ ] 소론도 기록 버튼
-- [ ] 오늘 상태 버튼
-- [ ] 기록 확인 버튼
+- [ ] 기존 개발 데이터 보존 없이 스키마 재생성
+- [ ] `quantity_options`
+- [ ] `client_request_id` unique
+- [ ] 약 이름·단위·일정 시각 스냅샷
+- [ ] `is_extra`, `deleted_at`
+- [ ] 상태 날짜 unique
+- [ ] 수량 check, FK, 인덱스
+- [ ] snapshot과 `updated_at` trigger
+- [ ] anon RLS 정책과 허용/거부 테스트
 
-첫 화면은 최대한 단순하게 유지한다.
+### Phase 0.2 Supabase 단일 저장소
 
-## Phase 4 - 투약 기록
+- [ ] localStorage·IndexedDB 코드 제거
+- [ ] mock 외의 fallback DB 제거
+- [ ] 운영 환경변수 검증
+- [ ] publishable key와 legacy anon key 호환
+- [ ] 브라우저 세션·로컬 영구 저장 비활성화
+- [ ] 조회 로딩·빈 상태·오류 구분
 
-- [ ] 약 선택
-- [ ] 복용 개수 선택
-- [ ] 직접 개수 입력
-- [ ] 실제 복용 시간 자동 기록
-- [ ] 저장
-- [ ] 저장 완료 메시지
-- [ ] 첫 화면으로 복귀
+### Phase 0.3 쓰기 신뢰성
 
-## Phase 5 - 상태 기록
+- [ ] 모든 create/update/delete `await`
+- [ ] 성공 응답 전 완료 UI 금지
+- [ ] 저장 중 중복 제출 차단
+- [ ] 재시도 시 같은 `client_request_id` 사용
+- [ ] 실패 시 가짜 로컬 기록 없음
+- [ ] 쓰기 성공 후 Supabase 재조회
 
-- [ ] 피로
-- [ ] 근력
-- [ ] 호흡
-- [ ] 눈 증상
+### Phase 0.4 일정·시간·과거 무결성
+
+- [ ] 일정 진입 기록에 정확한 `schedule_id` 연결
+- [ ] 일정 없는 기록 분리
+- [ ] KST 날짜 경계 유틸 통일
+- [ ] `timestamptz` 저장과 KST 표시
+- [ ] 약·일정 변경 후 과거 스냅샷 불변 검증
+- [ ] soft delete 행을 기본 조회에서 제외
+
+### Phase 0.5 핵심 화면 안정화
+
+- [ ] 홈 활성 약 조회
+- [ ] 투약 수량 선택과 직접 입력
+- [ ] 오늘 상태 upsert
+- [ ] 날짜별 투약 조회
+- [ ] 설정·조회·저장 오류 UI
+- [ ] 모바일 기본 접근성
+
+## 3. P1 — 일상 사용 기능
+
+### Phase 1.1 홈 정보
+
+- [ ] 약별 마지막 복용
+- [ ] 약별 오늘 누적
+- [ ] 일정별 `기록 있음 / 아직 기록 없음`
+- [ ] 미복용·지연 판정 문구 없음
+
+### Phase 1.2 상세 투약
+
+- [ ] 실제 복용 시각 입력·수정
 - [ ] 메모
-- [ ] 저장
+- [ ] 일정 복용과 추가 복용 구분
+- [ ] 기록 수정
+- [ ] soft delete
+- [ ] 삭제 실행 취소
 
-## Phase 6 - 기록 확인
+### Phase 1.3 상태와 타임라인
 
-- [ ] 오늘 기록
-- [ ] 날짜 선택
-- [ ] 과거 기록
-- [ ] 약별 기록
-- [ ] 복용 개수
-- [ ] 실제 복용 시간
-- [ ] 하루 총 복용량
+- [ ] 날짜별 상태 조회·수정·삭제
+- [ ] 날짜별 투약+상태 타임라인
+- [ ] 실제 시각 정렬
+- [ ] 통계·추이·의료 해석 없음
 
-## Phase 7 - 약 설정
+### Phase 1.4 약과 스케줄 설정
 
-- [ ] 약 추가
-- [ ] 약 수정
-- [ ] 약 비활성화
-- [ ] 기본 복용량
-- [ ] 복용 횟수
-- [ ] 복용 예정 시간
+- [ ] 약 추가·수정·활성화·비활성화
+- [ ] 수량 선택지 설정
+- [ ] 일정 추가·수정·활성화·비활성화
+- [ ] 사용 이력의 연쇄 삭제 방지
+- [ ] 설정 변경 후 과거 스냅샷 검증
 
-## Phase 8 - 접근성
+### Phase 1.5 접근성 완료
 
-- [ ] 큰 버튼
-- [ ] 충분한 터치 영역
-- [ ] 높은 색상 대비
-- [ ] 큰 글자
-- [ ] 색상만으로 상태 구분하지 않기
-- [ ] 휴대폰 글자 확대 테스트
-- [ ] 화면 낭독기 기본 테스트
+- [ ] 최소 48px 터치 영역
+- [ ] 200% 글자 확대
+- [ ] 키보드 전체 흐름
+- [ ] 화면 낭독기 이름·상태·라이브 영역
+- [ ] 포커스 관리
+- [ ] 색상 외 상태 텍스트
 
-## Phase 9 - PWA
+## 4. 테스트 전략
 
-- [ ] manifest
-- [ ] 아이콘
-- [ ] standalone
-- [ ] 홈 화면 설치 테스트
-- [ ] Android 테스트
-- [ ] iPhone 테스트
+### 단위·통합 테스트 대상
 
-## Phase 10 - 추가 기능
+- KST 날짜 변환과 자정 경계
+- 수량 검증
+- 일정 연결과 추가 복용 분류
+- 마지막 복용·오늘 누적 계산 시 soft delete 제외
+- Supabase 오류 매핑
+- 같은 `client_request_id`의 멱등성
 
-필요할 경우 추가한다.
+### Playwright
 
-- [ ] 오프라인 기록
-- [ ] 서버 동기화
-- [ ] 투약 통계
-- [ ] 상태 그래프
-- [ ] CSV 내보내기
-- [ ] PDF 리포트
-- [ ] 의료진용 기록 출력
+Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 프로세스의 메모리에만 존재하며 다음을 사용하지 않는다.
 
-## 개발 원칙
+- 실제 Supabase
+- localStorage
+- IndexedDB
+- 쿠키
+- 파일 기반 영구 저장
 
-초기 버전에서는 기능을 많이 넣지 않는다.
+핵심 E2E:
 
-가장 먼저 완성해야 하는 흐름:
+- 홈의 주요 동작
+- 투약 기록 성공과 중복 제출 방지
+- 저장 실패 시 완료 처리 금지
+- 상태 저장
+- 날짜 이동과 기록 조회
+- P1 수정·soft delete·실행 취소
+- 약·일정 설정 후 과거 로그 불변
 
-앱 실행
-→ 메스티논 선택
-→ 몇 정인지 선택
-→ 저장
-→ 완료
+## 5. GitHub Actions CI
 
-이 흐름이 빠르고 편해야 한다.
+`.github/workflows/ci.yml`은 push, pull request, 수동 실행에서 다음 순서로 품질을 검사한다.
 
-그 다음 소론도와 상태 기록을 추가한다.
+1. Node.js 22 설정
+2. `npm ci`
+3. `npm run lint`
+4. `npm run build`
+5. Playwright Chromium 설치
+6. `NEXT_PUBLIC_USE_MOCK_DB=true npm run test:e2e`
+
+CI에는 Supabase 운영 URL/key와 Vercel 배포 토큰이 필요하지 않다. Actions에서 `vercel deploy`를 실행하지 않는다.
+
+## 6. 로컬 완료 검사
+
+```bash
+npm run lint
+npm run build
+npm run test:e2e
+```
+
+Playwright 최초 실행 환경에서는 Chromium 설치가 필요하다.
+
+```bash
+npx playwright install chromium
+```
+
+## 7. 완료 정의
+
+변경은 다음을 모두 만족해야 완료다.
+
+- lint 오류 0
+- production build 성공
+- Playwright 핵심 흐름 성공
+- 운영 모드가 Supabase 외 저장소를 사용하지 않음
+- 실패한 쓰기를 성공으로 표시하지 않음
+- 반복 제출로 중복 로그가 생기지 않음
+- 한국 날짜 경계와 과거 스냅샷 테스트 통과
+- P0/P1 제외 기능을 새 의존성이나 UI로 추가하지 않음
+
+## 8. 명시적 제외
+
+- 인증, 접근 코드, 기기 승인
+- localStorage, IndexedDB, 오프라인 캐시·큐·동기화
+- 백업·복원, CSV/PDF
+- 리마인더·푸시 알림, 미복용 판정
+- 통계·그래프·추이
+- 역할·초대·공유 관리
+- AI 분석과 의료 판단
+
+위 항목은 개발 backlog가 아니라 현재 제품 범위에서 제외된 결정이다.

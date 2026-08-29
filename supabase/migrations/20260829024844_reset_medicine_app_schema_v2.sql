@@ -301,7 +301,7 @@ grant update (name, unit, active, quantity_options)
 grant select on table public.medication_schedules to anon;
 grant insert (medication_id, time, default_quantity, active)
   on table public.medication_schedules to anon;
-grant update (time, default_quantity, active)
+grant update (medication_id, time, default_quantity, active)
   on table public.medication_schedules to anon;
 grant delete on table public.medication_schedules to anon;
 
@@ -328,7 +328,7 @@ grant update (
 grant select on table public.daily_status to anon;
 grant insert (date, fatigue, strength, breathing, eye_symptom, note)
   on table public.daily_status to anon;
-grant update (date, fatigue, strength, breathing, eye_symptom, note)
+grant update (fatigue, strength, breathing, eye_symptom, note)
   on table public.daily_status to anon;
 grant delete on table public.daily_status to anon;
 

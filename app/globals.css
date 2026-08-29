@@ -52,13 +52,50 @@
 
 html {
   height: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
   min-height: 100%;
   background: var(--canvas);
   color: var(--ink);
+  font-size: 1.125rem;
+  line-height: 1.5;
   font-family: "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
     "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+:where(button, input, textarea, select):disabled {
+  cursor: not-allowed;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+textarea {
+  resize: vertical;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -27,8 +27,12 @@ export function OfflineBanner() {
   if (!offline) return null;
 
   return (
-    <div role="status" className="bg-surface-strong px-4 py-2 text-center text-sm font-semibold text-body">
-      오프라인 상태입니다. 기록은 표시 불가할 수 있습니다.
+    <div
+      role="status"
+      aria-live="polite"
+      className="bg-warning px-4 py-3 text-center text-sm font-bold text-on-primary"
+    >
+      인터넷 연결이 필요합니다. 지금은 기록을 불러오거나 저장할 수 없습니다.
     </div>
   );
 }

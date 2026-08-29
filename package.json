@@ -1,12 +1,14 @@
 {
-  "name": "medicine-app",
+  "name": "me-drugmgr",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "npm run test:e2e",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ServiceWorkerRegistration } from "./sw-register";
 import { OfflineBanner } from "./offline-banner";
+import { DbProvider } from "@/lib/store";
 
 export const metadata: Metadata = {
   title: "투약 관리",
@@ -23,9 +24,11 @@ export default function RootLayout({
     <html lang="ko">
       <body className="min-h-screen font-sans antialiased">
         <OfflineBanner />
-        <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-canvas px-5 pb-8 pt-6">
-          {children}
-        </div>
+        <DbProvider>
+          <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-canvas px-5 pb-8 pt-6">
+            {children}
+          </div>
+        </DbProvider>
         <ServiceWorkerRegistration />
       </body>
     </html>

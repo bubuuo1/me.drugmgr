@@ -1,175 +1,274 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ErrorBanner, LoadingState } from "@/app/components/ui";
+import { formatDateTime, toDateKey } from "@/lib/date";
 import { useDb } from "@/lib/store";
-import { isToday, toDateKey } from "@/lib/date";
 import { isBooleanOnly } from "@/lib/types";
 
 export default function Home() {
-  const { db } = useDb();
-  const medications = db.medications.filter((m) => m.active);
+  const { db, loading, error, refresh, clearError } = useDb();
+  const [refreshing, setRefreshing] = useState(false);
+  const today = toDateKey(new Date());
 
-  const medById = useMemo(
-    () => new Map(db.medications.map((m) => [m.id, m])),
+  const medications = useMemo(
+    () => db.medications.filter((medication) => medication.active),
     [db.medications]
   );
-
-  const today = toDateKey(new Date());
+  const medById = useMemo(
+    () => new Map(db.medications.map((medication) => [medication.id, medication])),
+    [db.medications]
+  );
   const todayLogs = useMemo(
     () =>
-      db.medication_logs.filter((l) => {
-        const t = new Date(l.taken_at);
-        return toDateKey(t) === today;
-      }),
+      db.medication_logs
+        .filter(
+          (log) =>
+            log.deleted_at === null && toDateKey(new Date(log.taken_at)) === today
+        )
+        .sort((a, b) => a.taken_at.localeCompare(b.taken_at)),
     [db.medication_logs, today]
   );
+  const todaySchedules = useMemo(
+    () =>
+      db.medication_schedules
+        .filter((schedule) => {
+          const medication = medById.get(schedule.medication_id);
+          return schedule.active && medication?.active;
+        })
+        .sort((a, b) => a.time.localeCompare(b.time)),
+    [db.medication_schedules, medById]
+  );
+  const todayStatus = db.daily_status.find((status) => status.date === today);
+  const recordedScheduleIds = useMemo(
+    () =>
+      new Set(
+        todayLogs
+          .map((log) => log.schedule_id)
+          .filter((scheduleId): scheduleId is string => scheduleId !== null)
+      ),
+    [todayLogs]
+  );
+  const recordedScheduleCount = todaySchedules.filter((schedule) =>
+    recordedScheduleIds.has(schedule.id)
+  ).length;
 
-  const medsToday = medications.map((med) => {
-    const logs = todayLogs.filter((l) => l.medication_id === med.id);
-    const count = logs.reduce((sum, l) => sum + l.quantity, 0);
-    return {
-      med,
-      booleanOnly: isBooleanOnly(med),
-      logged: logs.length > 0,
-      count,
-    };
-  });
+  async function retry() {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
-  const todaySchedules = db.medication_schedules
-    .filter((s) => {
-      if (!s.active) return false;
-      const med = medById.get(s.medication_id);
-      return !!med && med.active;
-    })
-    .sort((a, b) => (a.time < b.time ? -1 : 1))
-    .map((s) => {
-      const med = medById.get(s.medication_id)!;
-      const logged = todayLogs.some((l) => l.medication_id === s.medication_id);
-      return { schedule: s, med, logged };
-    });
-
-  const actionLink = (medicationId: string) =>
-    `/log?med=${encodeURIComponent(medicationId)}`;
+  if (loading && medications.length === 0) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <header className="pt-3">
+          <h1 className="text-2xl font-bold text-ink">투약 관리</h1>
+        </header>
+        <LoadingState label="오늘 기록을 불러오는 중입니다." />
+      </main>
+    );
+  }
 
   return (
-    <main className="flex flex-1 flex-col gap-8">
-      <header className="pt-4">
-        <h1 className="text-[24px] font-bold leading-[1.4] text-ink">투약 관리</h1>
-        <p className="mt-1 text-[16px] text-muted">
-          {isToday(today) ? "오늘의 기록" : "기록 확인"}
-        </p>
+    <main className="flex flex-1 flex-col gap-7">
+      <header className="pt-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold leading-snug text-ink">투약 관리</h1>
+            <p className="mt-1 text-lg text-muted">오늘의 기록</p>
+          </div>
+          <Link
+            href="/settings"
+            className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas px-4 text-base font-bold text-ink"
+          >
+            약 설정
+          </Link>
+        </div>
       </header>
 
-      <section className="rounded-2xl border border-hairline px-5 py-4">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-[18px] font-bold text-ink">오늘 현황</h2>
-          <span className="text-sm text-muted">
-            {medsToday.filter((m) => m.logged).length}/{medsToday.length} 기록됨
-          </span>
+      {loading && (
+        <p
+          role="status"
+          className="rounded-xl bg-surface-soft px-4 py-3 text-center text-base font-semibold text-body"
+        >
+          최신 기록을 확인하고 있습니다.
+        </p>
+      )}
+
+      <ErrorBanner
+        message={error}
+        onRetry={retry}
+        onDismiss={clearError}
+        retrying={refreshing}
+      />
+
+      <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
+        <div>
+          <h2 id="quick-log-title" className="text-xl font-bold text-ink">
+            빠른 투약 기록
+          </h2>
+          <p className="mt-1 text-base leading-relaxed text-muted">
+            복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.
+          </p>
         </div>
-        <ul className="mt-3 flex flex-col gap-2">
-          {medsToday.map(({ med, booleanOnly, logged, count }) => (
-            <li
-              key={med.id}
-              className="flex items-center justify-between gap-3 text-base"
+
+        {medications.length === 0 ? (
+          <div className="rounded-2xl border border-hairline px-5 py-5">
+            <p className="text-lg font-semibold text-body">활성화된 약이 없습니다.</p>
+            <Link
+              href="/settings"
+              className="mt-4 inline-flex min-h-12 items-center justify-center rounded-full bg-primary-active px-5 text-base font-bold text-on-primary"
             >
-              <span className="font-medium text-ink">{med.name}</span>
-              {!logged ? (
-                <span className="font-semibold text-muted">미기록</span>
-              ) : booleanOnly ? (
-                <span className="font-semibold text-primary">복용함</span>
-              ) : (
-                <span className="font-semibold text-primary">
-                  {count}
-                  {med.unit} 복용
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+              약 등록하기
+            </Link>
+          </div>
+        ) : (
+          medications.map((medication) => {
+            const logs = todayLogs.filter(
+              (log) => log.medication_id === medication.id
+            );
+            const latest = logs.at(-1);
+            const total = logs.reduce((sum, log) => sum + log.quantity, 0);
+            const schedules = todaySchedules.filter(
+              (schedule) => schedule.medication_id === medication.id
+            );
+            const nextSchedule = schedules.find(
+              (schedule) => !recordedScheduleIds.has(schedule.id)
+            );
+            const href = nextSchedule
+              ? `/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(nextSchedule.id)}`
+              : `/log?med=${encodeURIComponent(medication.id)}&extra=1`;
+            const booleanOnly = isBooleanOnly(medication);
+
+            return (
+              <article
+                key={medication.id}
+                className="rounded-2xl border border-hairline px-5 py-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-xl font-bold text-ink">{medication.name}</h3>
+                    <p className="mt-1 text-base text-body">
+                      {latest
+                        ? `마지막 기록 ${formatDateTime(latest.taken_at)}`
+                        : "오늘 기록 없음"}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-surface-soft px-3 py-1 text-base font-bold text-body">
+                    {booleanOnly
+                      ? `오늘 ${logs.length}회`
+                      : `오늘 합계 ${total}${medication.unit}`}
+                  </span>
+                </div>
+                <Link
+                  href={href}
+                  className="mt-4 flex min-h-[4.5rem] w-full flex-col items-center justify-center rounded-full bg-primary-active px-6 text-center text-xl font-bold text-on-primary active:bg-ink"
+                >
+                  {nextSchedule
+                    ? `${nextSchedule.time} 예정 기록`
+                    : schedules.length > 0
+                      ? "추가 복용 기록"
+                      : "복용 기록"}
+                </Link>
+              </article>
+            );
+          })
+        )}
       </section>
 
-      <div className="flex flex-col gap-4">
-        {medications.map((med) => {
-          const todayMedCount = todayLogs
-            .filter((l) => l.medication_id === med.id)
-            .reduce((sum, l) => sum + l.quantity, 0);
-          const booleanOnly = isBooleanOnly(med);
-          return (
-            <Link
-              key={med.id}
-              href={actionLink(med.id)}
-              className="flex min-h-[72px] w-full flex-col items-center justify-center rounded-full bg-primary px-6 text-center text-[20px] font-bold text-on-primary transition-colors hover:bg-primary-active active:bg-primary-active"
-            >
-              {med.name} 기록
-              {booleanOnly ? (
-                todayMedCount > 0 ? (
-                  <span className="mt-0.5 text-sm font-semibold text-on-primary/90">
-                    복용함
-                  </span>
-                ) : (
-                  <span className="mt-0.5 text-sm font-semibold text-on-primary/70">
-                    미기록
-                  </span>
-                )
-              ) : (
-                todayMedCount > 0 && (
-                  <span className="mt-0.5 text-sm font-semibold text-on-primary/90">
-                    오늘 {todayMedCount}
-                    {med.unit} 복용
-                  </span>
-                )
-              )}
-            </Link>
-          );
-        })}
-
+      <nav className="grid gap-4" aria-label="기록 메뉴">
         <Link
-          href="/status"
-          className="flex min-h-[72px] w-full items-center justify-center rounded-full border-2 border-ink bg-canvas px-6 text-center text-[20px] font-bold text-ink transition-colors hover:bg-surface-soft active:bg-surface-soft"
+          href={`/status?date=${today}`}
+          className="flex min-h-[4.5rem] w-full items-center justify-between rounded-full border-2 border-ink bg-canvas px-6 text-xl font-bold text-ink active:bg-surface-soft"
         >
-          오늘 상태
+          <span>오늘 상태</span>
+          <span className="text-base font-semibold text-body">
+            {todayStatus ? "기록됨" : "기록 없음"}
+          </span>
         </Link>
-
         <Link
           href="/records"
-          className="flex min-h-[72px] w-full items-center justify-center rounded-full border-2 border-ink bg-canvas px-6 text-center text-[20px] font-bold text-ink transition-colors hover:bg-surface-soft active:bg-surface-soft"
+          className="flex min-h-[4.5rem] w-full items-center justify-center rounded-full border-2 border-ink bg-canvas px-6 text-xl font-bold text-ink active:bg-surface-soft"
         >
           기록 확인
         </Link>
-      </div>
+      </nav>
 
-      {todaySchedules.length > 0 && (
-        <section className="rounded-2xl border border-hairline px-5 py-4">
-          <h2 className="text-[18px] font-bold text-ink">오늘 예정</h2>
-          <ul className="mt-3 flex flex-col gap-2">
-            {todaySchedules.map(({ schedule, med, logged }) => (
-              <li
-                key={schedule.id}
-                className="flex items-center justify-between gap-3 text-base"
-              >
-                <span className="font-medium text-ink">{schedule.time}</span>
-                <span className="text-body">
-                  {med.name}
-                  {!isBooleanOnly(med) && schedule.default_quantity > 0
-                    ? ` ${schedule.default_quantity}${med.unit}`
-                    : ""}
-                </span>
-                <span
-                  className={
-                    logged
-                      ? "font-semibold text-primary"
-                      : "font-semibold text-muted"
-                  }
-                >
-                  {logged ? "복용함" : "미기록"}
-                </span>
-              </li>
-            ))}
+      <section
+        aria-labelledby="schedule-title"
+        className="rounded-2xl border border-hairline px-5 py-5"
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="schedule-title" className="text-xl font-bold text-ink">
+            오늘 예정
+          </h2>
+          {todaySchedules.length > 0 && (
+            <p className="text-base font-semibold text-body">
+              {recordedScheduleCount}/{todaySchedules.length}개 일정 기록
+            </p>
+          )}
+        </div>
+
+        {todaySchedules.length === 0 ? (
+          <p className="mt-3 text-base leading-relaxed text-muted">
+            등록된 복용 일정이 없습니다. 일정은 약 설정에서 추가할 수 있습니다.
+          </p>
+        ) : (
+          <ul className="mt-4 flex flex-col gap-3">
+            {todaySchedules.map((schedule) => {
+              const medication = medById.get(schedule.medication_id);
+              if (!medication) return null;
+              const log = todayLogs.find(
+                (candidate) => candidate.schedule_id === schedule.id
+              );
+              return (
+                <li key={schedule.id}>
+                  {log ? (
+                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3">
+                      <div>
+                        <p className="text-lg font-bold text-ink">
+                          {schedule.time} · {medication.name}
+                        </p>
+                        <p className="text-base text-body">
+                          실제 기록 {formatDateTime(log.taken_at)}
+                        </p>
+                      </div>
+                      <span className="font-bold text-success">기록됨</span>
+                    </div>
+                  ) : (
+                    <Link
+                      href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}`}
+                      className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 active:bg-surface-soft"
+                    >
+                      <div>
+                        <p className="text-lg font-bold text-ink">
+                          {schedule.time} · {medication.name}
+                        </p>
+                        {!isBooleanOnly(medication) && (
+                          <p className="text-base text-body">
+                            예정 수량 {schedule.default_quantity}
+                            {medication.unit}
+                          </p>
+                        )}
+                      </div>
+                      <span className="font-bold text-muted">기록하기</span>
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
+
+      <p className="pb-2 text-center text-sm leading-relaxed text-muted">
+        이 앱은 복용 사실을 기록하며 복용량이나 처방을 판단하지 않습니다.
+      </p>
     </main>
   );
 }

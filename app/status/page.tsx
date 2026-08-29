@@ -1,150 +1,382 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  ConfirmDialog,
+  ErrorBanner,
+  FieldError,
+  LoadingState,
+  Notice,
+  PageHeader,
+} from "@/app/components/ui";
+import { useOnlineStatus } from "@/app/components/use-online-status";
+import {
+  addDays,
+  formatKoreanFullDate,
+  fromDateKey,
+  toDateKey,
+} from "@/lib/date";
 import { useDb } from "@/lib/store";
-import { toDateKey } from "@/lib/date";
+import type { DailyStatus } from "@/lib/types";
 
-const statuses = {
-  fatigue: { label: "피로", options: ["좋음", "보통", "나쁨"] },
-  strength: { label: "근력", options: ["좋음", "보통", "나쁨"] },
-  breathing: { label: "호흡", options: ["편안함", "평소와 다름"] },
-  eye: { label: "눈 증상", options: ["없음", "있음"] },
+const statusGroups = {
+  fatigue: {
+    label: "피로",
+    options: [
+      { label: "거의 없음", value: "좋음" },
+      { label: "조금 피곤함", value: "보통" },
+      { label: "매우 피곤함", value: "나쁨" },
+    ],
+  },
+  strength: {
+    label: "근력",
+    options: [
+      { label: "평소와 비슷함", value: "좋음" },
+      { label: "조금 약함", value: "보통" },
+      { label: "많이 약함", value: "나쁨" },
+    ],
+  },
+  breathing: {
+    label: "호흡",
+    options: [
+      { label: "평소와 같음", value: "편안함" },
+      { label: "평소와 다름", value: "평소와 다름" },
+    ],
+  },
+  eye: {
+    label: "눈 증상",
+    options: [
+      { label: "증상 없음", value: "없음" },
+      { label: "증상 있음", value: "있음" },
+    ],
+  },
 } as const;
 
-type StatusKey = keyof typeof statuses;
+type StatusKey = keyof typeof statusGroups;
+type Values = Record<StatusKey, string | null>;
 
-export default function StatusPage() {
-  const router = useRouter();
-  const { db, upsertStatus, deleteStatus } = useDb();
-  const today = toDateKey(new Date());
-  const existing = db.daily_status.find((s) => s.date === today);
+function validDateKey(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return toDateKey(new Date());
+  }
+  try {
+    fromDateKey(value);
+    return value;
+  } catch {
+    return toDateKey(new Date());
+  }
+}
 
-  const [values, setValues] = useState<Record<StatusKey, string | null>>({
+function messageOf(error: unknown) {
+  return error instanceof Error ? error.message : "상태 기록을 처리하지 못했습니다.";
+}
+
+type StatusEditorProps = {
+  dateKey: string;
+  existing?: DailyStatus;
+  onInteraction: () => void;
+};
+
+function StatusEditor({
+  dateKey,
+  existing,
+  onInteraction,
+}: StatusEditorProps) {
+  const online = useOnlineStatus();
+  const {
+    error,
+    clearError,
+    upsertStatus,
+    deleteStatus,
+  } = useDb();
+  const [values, setValues] = useState<Values>({
     fatigue: existing?.fatigue ?? null,
     strength: existing?.strength ?? null,
     breathing: existing?.breathing ?? null,
     eye: existing?.eye_symptom ?? null,
   });
-  const [note, setNote] = useState<string>(existing?.note ?? "");
-  const [saved, setSaved] = useState(false);
+  const [note, setNote] = useState(existing?.note ?? "");
+  const [pending, setPending] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  function pick(key: StatusKey, value: string) {
-    setValues((prev) => ({ ...prev, [key]: value }));
+  function pick(key: StatusKey, option: string) {
+    onInteraction();
+    setValues((current) => ({
+      ...current,
+      [key]: current[key] === option ? null : option,
+    }));
+    setFieldError(null);
+    setSuccess(null);
   }
 
-  function save() {
-    upsertStatus({
-      date: today,
-      fatigue: values.fatigue,
-      strength: values.strength,
-      breathing: values.breathing,
-      eye_symptom: values.eye,
-      note: note.trim() || null,
-    });
-    setSaved(true);
-    setTimeout(() => {
-      router.push("/");
-    }, 700);
+  async function save() {
+    if (pending || !online) return;
+    const hasContent = Object.values(values).some(Boolean) || note.trim().length > 0;
+    if (!hasContent) {
+      setFieldError(
+        existing
+          ? "모든 내용을 지우려면 아래의 상태 기록 삭제를 이용해 주세요."
+          : "상태를 하나 이상 선택하거나 메모를 입력해 주세요."
+      );
+      return;
+    }
+
+    setPending(true);
+    setLocalError(null);
+    setFieldError(null);
+    setSuccess(null);
+    clearError();
+    try {
+      await upsertStatus({
+        date: dateKey,
+        fatigue: values.fatigue,
+        strength: values.strength,
+        breathing: values.breathing,
+        eye_symptom: values.eye,
+        note: note.trim() || null,
+      });
+      setSuccess(`${formatKoreanFullDate(dateKey)} 상태를 저장했습니다.`);
+    } catch (caught) {
+      setLocalError(messageOf(caught));
+    } finally {
+      setPending(false);
+    }
   }
 
-  function reset() {
-    deleteStatus(today);
-    setValues({
-      fatigue: null,
-      strength: null,
-      breathing: null,
-      eye: null,
-    });
-    setNote("");
-    setSaved(false);
+  async function remove() {
+    if (!existing || pending || !online) return;
+    setPending(true);
+    setLocalError(null);
+    setSuccess(null);
+    clearError();
+    try {
+      await deleteStatus(dateKey);
+      setValues({
+        fatigue: null,
+        strength: null,
+        breathing: null,
+        eye: null,
+      });
+      setNote("");
+      setSuccess(`${formatKoreanFullDate(dateKey)} 상태 기록을 삭제했습니다.`);
+      setConfirmDelete(false);
+    } catch (caught) {
+      setLocalError(messageOf(caught));
+      setConfirmDelete(false);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6">
-      <header className="flex items-center gap-3 pt-2">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-strong text-ink active:bg-surface-soft"
-          aria-label="뒤로 가기"
-        >
-          ‹
-        </button>
-        <h1 className="text-[24px] font-bold text-ink">오늘 상태</h1>
-      </header>
+    <div className="flex flex-col gap-6">
+      <ErrorBanner
+        message={localError ?? error}
+        onDismiss={() => {
+          setLocalError(null);
+          clearError();
+        }}
+      />
 
-      {saved ? (
-        <div className="flex flex-col gap-4">
-          <div
-            role="status"
-            className="rounded-2xl bg-surface-soft px-6 py-5 text-center text-lg font-semibold text-body"
-          >
-            오늘 상태를 기록했습니다.
-          </div>
-          <button
-            type="button"
-            onClick={reset}
-            className="flex min-h-[56px] w-full items-center justify-center rounded-lg border border-warning bg-canvas px-6 text-lg font-bold text-warning active:bg-surface-soft"
-          >
-            오늘의 상태 초기화
-          </button>
-        </div>
-      ) : (
-        <>
-          {Object.entries(statuses).map(([key, group]) => (
-            <section key={key} className="flex flex-col gap-3">
-              <h2 className="text-[20px] font-bold text-ink">{group.label}</h2>
-              <div className="flex flex-wrap gap-3">
-                {group.options.map((opt) => {
-                  const selected = values[key as StatusKey] === opt;
+      {!online && (
+        <Notice tone="warning">
+          인터넷 연결이 없어 지금은 저장하거나 삭제할 수 없습니다.
+        </Notice>
+      )}
+
+      {success && <Notice tone="success">{success}</Notice>}
+
+      <p className="text-base leading-relaxed text-muted">
+        필요한 항목만 선택할 수 있습니다. 선택한 항목을 다시 누르면 선택이 해제됩니다.
+      </p>
+
+      <form
+        className="flex flex-col gap-7"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        {Object.entries(statusGroups).map(([rawKey, group]) => {
+          const key = rawKey as StatusKey;
+          return (
+            <fieldset key={key} className="flex flex-col gap-3" disabled={pending}>
+              <legend className="text-xl font-bold text-ink">{group.label}</legend>
+              <div className="grid gap-3">
+                {group.options.map((option) => {
+                  const selected = values[key] === option.value;
                   return (
                     <button
-                      key={opt}
+                      key={option.value}
                       type="button"
-                      onClick={() => pick(key as StatusKey, opt)}
                       aria-pressed={selected}
+                      onClick={() => pick(key, option.value)}
                       className={
                         selected
-                          ? "flex min-h-[56px] items-center justify-center rounded-full bg-primary px-6 text-lg font-semibold text-on-primary"
-                          : "flex min-h-[56px] items-center justify-center rounded-full border border-hairline bg-canvas px-6 text-lg font-semibold text-ink"
+                          ? "flex min-h-14 w-full items-center justify-between rounded-full bg-primary-active px-6 text-left text-lg font-bold text-on-primary"
+                          : "flex min-h-14 w-full items-center justify-between rounded-full border-2 border-hairline bg-canvas px-6 text-left text-lg font-bold text-ink active:bg-surface-soft"
                       }
                     >
-                      {opt}
+                      <span>{option.label}</span>
+                      <span aria-hidden="true">{selected ? "선택됨" : ""}</span>
                     </button>
                   );
                 })}
               </div>
-            </section>
-          ))}
+            </fieldset>
+          );
+        })}
 
-          <section className="flex flex-col gap-2">
-            <label
-              htmlFor="status-note"
-              className="text-[20px] font-bold text-ink"
-            >
-              기타 메모
-            </label>
-            <textarea
-              id="status-note"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-hairline bg-canvas px-4 py-3 text-base text-ink outline-none focus:border-2 focus:border-ink"
-              placeholder="예: 오후부터 피곤함"
-            />
-          </section>
+        <section className="flex flex-col gap-3">
+          <label htmlFor="status-note" className="text-xl font-bold text-ink">
+            기타 메모 <span className="text-base font-normal text-muted">(선택)</span>
+          </label>
+          <textarea
+            id="status-note"
+            value={note}
+            onChange={(event) => {
+              onInteraction();
+              setNote(event.target.value);
+              setFieldError(null);
+              setSuccess(null);
+            }}
+            disabled={pending}
+            rows={4}
+            maxLength={1000}
+            className="min-h-32 w-full rounded-xl border border-hairline bg-canvas px-4 py-3 text-lg text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
+            placeholder="예: 오후부터 평소보다 피곤했음"
+          />
+        </section>
 
+        {fieldError && <FieldError>{fieldError}</FieldError>}
+
+        <button
+          type="submit"
+          disabled={pending || !online}
+          className="flex min-h-16 w-full items-center justify-center rounded-xl bg-primary-active px-6 text-xl font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
+        >
+          {pending ? "저장 중입니다" : existing ? "상태 기록 수정" : "상태 기록 저장"}
+        </button>
+      </form>
+
+      {existing && (
+        <section className="border-t border-hairline-soft pt-5">
           <button
             type="button"
-            onClick={save}
-            className="mt-2 flex min-h-[56px] w-full items-center justify-center rounded-lg bg-primary px-6 text-lg font-bold text-on-primary active:bg-primary-active"
+            onClick={() => setConfirmDelete(true)}
+            disabled={pending || !online}
+            className="flex min-h-14 w-full items-center justify-center rounded-xl border border-warning bg-canvas px-6 text-lg font-bold text-warning disabled:opacity-60"
           >
-            저장
+            이 날짜의 상태 기록 삭제
           </button>
-        </>
+        </section>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="상태 기록을 삭제할까요?"
+          description={
+            <p>
+              <strong className="text-ink">
+                {formatKoreanFullDate(dateKey)}
+              </strong>
+              의
+              상태 선택과 메모가 삭제됩니다.
+            </p>
+          }
+          confirmLabel="상태 기록 삭제"
+          destructive
+          pending={pending}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={remove}
+        />
+      )}
+    </div>
+  );
+}
+
+function StatusPageInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const dateKey = validDateKey(params.get("date"));
+  const { db, loading, error, refresh, clearError } = useDb();
+  const [editingStarted, setEditingStarted] = useState(false);
+  const existing = db.daily_status.find((status) => status.date === dateKey);
+  const initialLoading =
+    loading &&
+    !editingStarted &&
+    db.medications.length === 0 &&
+    db.medication_schedules.length === 0 &&
+    db.medication_logs.length === 0 &&
+    db.daily_status.length === 0;
+
+  function navigate(nextDate: string) {
+    setEditingStarted(false);
+    router.replace(`/status?date=${nextDate}`);
+  }
+
+  return (
+    <main className="flex flex-1 flex-col gap-6">
+      <PageHeader title="상태 기록" />
+
+      <section aria-label="상태 기록 날짜" className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => navigate(addDays(dateKey, -1))}
+            className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
+            aria-label="이전 날짜"
+          >
+            ‹
+          </button>
+          <p className="text-center text-xl font-bold leading-snug text-ink">
+            {formatKoreanFullDate(dateKey)}
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(addDays(dateKey, 1))}
+            className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
+            aria-label="다음 날짜"
+          >
+            ›
+          </button>
+        </div>
+        <label htmlFor="status-date" className="text-base font-bold text-body">
+          다른 날짜 선택
+        </label>
+        <input
+          id="status-date"
+          type="date"
+          value={dateKey}
+          onChange={(event) => navigate(event.target.value)}
+          className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink focus:border-2 focus:border-ink"
+        />
+      </section>
+
+      {initialLoading ? (
+        <LoadingState label="상태 기록을 불러오는 중입니다." />
+      ) : error && db.daily_status.length === 0 ? (
+        <ErrorBanner message={error} onRetry={refresh} onDismiss={clearError} />
+      ) : (
+        <StatusEditor
+          key={dateKey}
+          dateKey={dateKey}
+          existing={existing}
+          onInteraction={() => setEditingStarted(true)}
+        />
       )}
     </main>
   );
 }
 
+export default function StatusPage() {
+  return (
+    <Suspense fallback={<LoadingState label="상태 기록 화면을 준비하고 있습니다." />}>
+      <StatusPageInner />
+    </Suspense>
+  );
+}
