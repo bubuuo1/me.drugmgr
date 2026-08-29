@@ -273,6 +273,7 @@ export type DbContextValue = {
   addMedication(input: AddMedicationInput): Promise<Medication>;
   updateMedication(id: string, patch: UpdateMedicationInput): Promise<Medication>;
   deactivateMedication(id: string): Promise<Medication>;
+  deleteMedication(id: string): Promise<Medication>;
   addSchedule(input: AddScheduleInput): Promise<MedicationSchedule>;
   updateSchedule(id: string, patch: UpdateScheduleInput): Promise<MedicationSchedule>;
   deleteSchedule(id: string): Promise<MedicationSchedule>;
@@ -752,6 +753,33 @@ export function DbProvider({ children }: PropsWithChildren) {
     [dataRequests, requireOwnerSpace, run]
   );
 
+  const deleteMedication = useCallback(
+    async (id: string) => {
+      const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
+      const scheduleIds = db.medication_schedules
+        .filter((schedule) => schedule.medication_id === id)
+        .map((schedule) => schedule.id);
+      const row = await run(() => repository.deleteMedication(space.id, id));
+      if (scheduleIds.length > 0) {
+        await dismissScheduleNotifications(scheduleIds);
+      }
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medications: current.medications.filter(
+            (medication) => medication.id !== id
+          ),
+          medication_schedules: current.medication_schedules.filter(
+            (schedule) => schedule.medication_id !== id
+          ),
+        }));
+      }
+      return row;
+    },
+    [dataRequests, db.medication_schedules, requireOwnerSpace, run]
+  );
+
   const addSchedule = useCallback(
     async (input: AddScheduleInput) => {
       const space = requireOwnerSpace();
@@ -1005,6 +1033,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       addMedication,
       updateMedication,
       deactivateMedication,
+      deleteMedication,
       addSchedule,
       updateSchedule,
       deleteSchedule,
@@ -1042,6 +1071,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       addMedication,
       updateMedication,
       deactivateMedication,
+      deleteMedication,
       addSchedule,
       updateSchedule,
       deleteSchedule,

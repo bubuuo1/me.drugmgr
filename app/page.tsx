@@ -272,10 +272,6 @@ export default function Home() {
           </ul>
         )}
       </section>
-
-      <p className="pb-2 text-center text-sm leading-relaxed text-muted">
-        이 앱은 복용 사실을 기록하며 복용량이나 처방을 판단하지 않습니다.
-      </p>
     </main>
   );
 }

@@ -175,6 +175,7 @@ export class SupabaseDbRepository implements DbRepository {
         .from("medications")
         .select("*")
         .eq("care_space_id", careSpaceId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true }),
       client
         .from("medication_schedules")
@@ -198,9 +199,15 @@ export class SupabaseDbRepository implements DbRepository {
     if (logs.error) throw failure("투약 기록 조회", logs.error);
     if (statuses.error) throw failure("상태 기록 조회", statuses.error);
 
+    const visibleMedicationIds = new Set(
+      medications.data.map((medication) => medication.id)
+    );
+
     return {
       medications: medications.data,
-      medication_schedules: schedules.data.map(normalizeSchedule),
+      medication_schedules: schedules.data
+        .filter((schedule) => visibleMedicationIds.has(schedule.medication_id))
+        .map(normalizeSchedule),
       medication_logs: logs.data.map(normalizeLog),
       daily_status: statuses.data,
     };
@@ -246,6 +253,18 @@ export class SupabaseDbRepository implements DbRepository {
     id: string
   ): Promise<Medication> {
     return this.updateMedication(careSpaceId, id, { active: false });
+  }
+
+  async deleteMedication(
+    careSpaceId: string,
+    id: string
+  ): Promise<Medication> {
+    const { data, error } = await requireSupabase().rpc(
+      "soft_delete_medication",
+      { p_care_space_id: careSpaceId, p_medication_id: id }
+    );
+    if (error) throw failure("약 삭제", error);
+    return data;
   }
 
   async addSchedule(

@@ -37,6 +37,7 @@ drop function if exists public.accept_care_space_invite(uuid) cascade;
 drop function if exists public.decline_care_space_invite(uuid) cascade;
 drop function if exists public.revoke_care_space_invite(uuid) cascade;
 drop function if exists public.remove_care_space_member(uuid, uuid) cascade;
+drop function if exists public.soft_delete_medication(uuid, uuid) cascade;
 drop function if exists public.claim_care_space_invite_email_send(uuid) cascade;
 drop function if exists public.claim_care_space_invite_email_send(text, uuid) cascade;
 drop function if exists public.register_push_subscription(text, text, text, timestamptz) cascade;
@@ -177,6 +178,7 @@ create table public.medications (
   name text not null,
   unit text not null default '정',
   active boolean not null default true,
+  deleted_at timestamptz null,
   quantity_options jsonb not null default '[1,2,3,4]'::jsonb,
   created_by uuid null references auth.users(id) on delete set null,
   updated_by uuid null references auth.users(id) on delete set null,
@@ -189,6 +191,9 @@ create table public.medications (
   constraint medications_unit_valid check (
     unit = btrim(unit) and char_length(unit) <= 20
   ),
+  constraint medications_deleted_inactive check (
+    deleted_at is null or not active
+  ),
   constraint medications_quantity_options_valid check (
     jsonb_typeof(quantity_options) = 'array'
     and jsonb_array_length(quantity_options) <= 50
@@ -200,11 +205,15 @@ create table public.medications (
 );
 
 create unique index medications_care_space_name_unique
-  on public.medications (care_space_id, lower(name));
+  on public.medications (care_space_id, lower(name))
+  where deleted_at is null;
 create index medications_active_idx
   on public.medications (created_at) where active;
 create index medications_care_space_active_idx
   on public.medications (care_space_id, created_at) where active;
+create index medications_care_space_visible_idx
+  on public.medications (care_space_id, created_at)
+  where deleted_at is null;
 
 create table public.medication_schedules (
   id uuid primary key default gen_random_uuid(),
@@ -678,7 +687,8 @@ begin
       into selected_medication_name, selected_medication_unit
       from public.medications as medication
       where medication.id = new.medication_id
-        and medication.care_space_id = new.care_space_id;
+        and medication.care_space_id = new.care_space_id
+        and medication.deleted_at is null;
     if not found then
       raise foreign_key_violation
         using message = 'medication_id does not belong to care_space_id';
@@ -932,14 +942,41 @@ create policy medications_owner_update
 
 create policy medication_schedules_member_select
   on public.medication_schedules for select to authenticated
-  using ((select private.is_care_space_member(care_space_id)));
+  using (
+    (select private.is_care_space_member(care_space_id))
+    and exists (
+      select 1
+        from public.medications as medication
+        where medication.id = medication_schedules.medication_id
+          and medication.care_space_id = medication_schedules.care_space_id
+          and medication.deleted_at is null
+    )
+  );
 create policy medication_schedules_owner_insert
   on public.medication_schedules for insert to authenticated
-  with check ((select private.is_care_space_owner(care_space_id)));
+  with check (
+    (select private.is_care_space_owner(care_space_id))
+    and exists (
+      select 1
+        from public.medications as medication
+        where medication.id = medication_schedules.medication_id
+          and medication.care_space_id = medication_schedules.care_space_id
+          and medication.deleted_at is null
+    )
+  );
 create policy medication_schedules_owner_update
   on public.medication_schedules for update to authenticated
   using ((select private.is_care_space_owner(care_space_id)))
-  with check ((select private.is_care_space_owner(care_space_id)));
+  with check (
+    (select private.is_care_space_owner(care_space_id))
+    and exists (
+      select 1
+        from public.medications as medication
+        where medication.id = medication_schedules.medication_id
+          and medication.care_space_id = medication_schedules.care_space_id
+          and medication.deleted_at is null
+    )
+  );
 create policy medication_schedules_owner_delete
   on public.medication_schedules for delete to authenticated
   using ((select private.is_care_space_owner(care_space_id)));
@@ -1002,7 +1039,7 @@ grant select on table public.care_space_invites to authenticated;
 grant select on table public.medications to authenticated;
 grant insert (care_space_id, name, unit, active, quantity_options)
   on table public.medications to authenticated;
-grant update (name, unit, active, quantity_options)
+grant update (name, unit, active, deleted_at, quantity_options)
   on table public.medications to authenticated;
 
 grant select on table public.medication_schedules to authenticated;
@@ -1403,6 +1440,53 @@ begin
 end;
 $$;
 
+create or replace function public.soft_delete_medication(
+  p_care_space_id uuid,
+  p_medication_id uuid
+)
+returns public.medications
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  selected_medication public.medications;
+begin
+  if (select auth.uid()) is null then
+    raise insufficient_privilege using message = 'authentication required';
+  end if;
+  if not private.is_care_space_owner(p_care_space_id) then
+    raise insufficient_privilege using message = 'care space owner required';
+  end if;
+
+  select medication.* into selected_medication
+    from public.medications as medication
+    where medication.id = p_medication_id
+      and medication.care_space_id = p_care_space_id
+      and medication.deleted_at is null
+    for update;
+  if not found then
+    raise no_data_found using message = 'medication not found';
+  end if;
+
+  update public.medication_schedules as schedule
+    set active = false
+    where schedule.care_space_id = p_care_space_id
+      and schedule.medication_id = p_medication_id
+      and schedule.active;
+
+  update public.medications as medication
+    set active = false,
+        deleted_at = now()
+    where medication.id = p_medication_id
+      and medication.care_space_id = p_care_space_id
+      and medication.deleted_at is null
+    returning medication.* into selected_medication;
+
+  return selected_medication;
+end;
+$$;
+
 revoke all on function public.create_care_space_invite(uuid, text, text, timestamptz)
   from public, anon, authenticated;
 revoke all on function public.get_pending_care_space_invites()
@@ -1415,6 +1499,8 @@ revoke all on function public.revoke_care_space_invite(uuid)
   from public, anon, authenticated;
 revoke all on function public.remove_care_space_member(uuid, uuid)
   from public, anon, authenticated;
+revoke all on function public.soft_delete_medication(uuid, uuid)
+  from public, anon, authenticated;
 grant execute on function public.create_care_space_invite(uuid, text, text, timestamptz)
   to authenticated;
 grant execute on function public.get_pending_care_space_invites()
@@ -1423,6 +1509,8 @@ grant execute on function public.accept_care_space_invite(uuid) to authenticated
 grant execute on function public.decline_care_space_invite(uuid) to authenticated;
 grant execute on function public.revoke_care_space_invite(uuid) to authenticated;
 grant execute on function public.remove_care_space_member(uuid, uuid)
+  to authenticated;
+grant execute on function public.soft_delete_medication(uuid, uuid)
   to authenticated;
 
 create or replace function private.push_dispatch_secret_matches(p_secret text)

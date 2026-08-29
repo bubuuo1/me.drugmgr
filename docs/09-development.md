@@ -12,7 +12,7 @@
 
 Google 로그인 운영 설정은 코드 저장소 밖에서 완료한다.
 
-1. 운영 DB를 백업하고 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`을 순서대로 적용한다.
+1. 운영 DB를 백업하고 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`, `supabase/migrations/20260830050000_soft_delete_medications_preserve_logs.sql`을 순서대로 적용한다.
 2. Google Cloud OAuth 동의 화면을 구성하고 웹 애플리케이션 OAuth Client ID/Secret을 만든다.
 3. Google 승인된 redirect URI에 `https://<project-ref>.supabase.co/auth/v1/callback`을 등록한다.
 4. Supabase Authentication > Providers > Google에 Client ID/Secret을 저장하고 공급자를 활성화한다.
@@ -125,11 +125,11 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 ### Phase 1.4 약과 스케줄 설정
 
-- [ ] 약 추가·수정·활성화·비활성화
+- [ ] 약 추가·수정·활성화·비활성화·soft delete
 - [ ] 수량 선택지 설정
 - [x] 약별 여러 복용·알림 시간 연속 추가·수정·켜기·끄기·삭제
 - [ ] 사용 이력의 연쇄 삭제 방지
-- [ ] 설정 변경 후 과거 스냅샷 검증
+- [ ] 약 삭제 후 등록 목록·일정·알림 제외 및 과거 약 이름·실제 복용 시각·수량 스냅샷 검증
 
 ### Phase 1.5 접근성 완료
 

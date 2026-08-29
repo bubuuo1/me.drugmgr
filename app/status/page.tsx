@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { DateNavigator } from "@/app/components/date-navigator";
 import {
   ConfirmDialog,
   ErrorBanner,
@@ -12,7 +13,6 @@ import {
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import {
-  addDays,
   formatKoreanFullDate,
   fromDateKey,
   toDateKey,
@@ -370,39 +370,12 @@ function StatusPageInner() {
     <main className="flex flex-1 flex-col gap-6">
       <PageHeader title="상태 기록" />
 
-      <section aria-label="상태 기록 날짜" className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(addDays(dateKey, -1))}
-            className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
-            aria-label="이전 날짜"
-          >
-            ‹
-          </button>
-          <p className="text-center text-xl font-bold leading-snug text-ink">
-            {formatKoreanFullDate(dateKey)}
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate(addDays(dateKey, 1))}
-            className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
-            aria-label="다음 날짜"
-          >
-            ›
-          </button>
-        </div>
-        <label htmlFor="status-date" className="text-base font-bold text-body">
-          다른 날짜 선택
-        </label>
-        <input
-          id="status-date"
-          type="date"
-          value={dateKey}
-          onChange={(event) => navigate(event.target.value)}
-          className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink focus:border-2 focus:border-ink"
-        />
-      </section>
+      <DateNavigator
+        value={dateKey}
+        onChange={navigate}
+        title="상태 기록 날짜"
+        inputId="status-date"
+      />
 
       {initialLoading ? (
         <LoadingState label="상태 기록을 불러오는 중입니다." />

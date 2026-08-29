@@ -43,6 +43,16 @@ function kstDateTime(time: string) {
   return kstDateKey() + "T" + time;
 }
 
+function shiftDateKey(key: string, days: number) {
+  const [year, month, day] = key.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    shifted.getUTCFullYear(),
+    String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+    String(shifted.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 async function selectPressed(button: Locator) {
   await expect(button).toBeVisible();
   if ((await button.getAttribute("aria-pressed")) !== "true") {
@@ -120,6 +130,12 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
 
   await expect(
     page.getByRole("heading", { level: 1, name: "가족 공유" })
+  ).toBeVisible();
+  await expect(
+    page.locator("main header").getByRole("link", {
+      name: "환경설정으로 이동",
+      exact: true,
+    })
   ).toBeVisible();
   await expect(page.getByText("테스트 사용자", { exact: true })).toBeVisible();
 
@@ -234,6 +250,38 @@ test("320px 모바일 화면에서 주요 화면에 가로 스크롤이 생기�
       )
       .toBe(true);
   }
+});
+
+test("복용기록 날짜를 이전·오늘·직접 선택으로 안전하게 이동한다", async ({
+  page,
+}) => {
+  await page.goto("/records");
+
+  const dateInput = page.getByLabel("날짜 직접 선택", { exact: true });
+  const today = kstDateKey();
+  await expect(dateInput).toHaveValue(today);
+  await expect(
+    page.getByRole("button", { name: "현재 날짜는 오늘", exact: true })
+  ).toBeDisabled();
+
+  await page.getByRole("button", { name: /^이전 날짜,/ }).click();
+  await expect(dateInput).toHaveValue(shiftDateKey(today, -1));
+  await page
+    .getByRole("button", { name: "오늘 날짜로 이동", exact: true })
+    .click();
+  await expect(dateInput).toHaveValue(today);
+
+  await dateInput.fill("");
+  await expect(page.locator("#record-date-error")).toContainText(
+    "날짜를 선택해 주세요."
+  );
+  await expect(
+    page.getByRole("heading", { level: 1, name: "복용기록 확인" })
+  ).toBeVisible();
+
+  await dateInput.fill("2026-08-28");
+  await expect(dateInput).toHaveValue("2026-08-28");
+  await expect(page.locator('time[datetime="2026-08-28"]')).toBeVisible();
 });
 
 test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시한다", async ({
@@ -363,6 +411,12 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     page.getByRole("heading", { level: 1, name: "환경설정" })
   ).toBeVisible();
   await expect(
+    page.locator("main header").getByRole("link", {
+      name: "첫 화면으로 이동",
+      exact: true,
+    })
+  ).toHaveCount(0);
+  await expect(
     page.getByText(/처방받은 약 이름, 수량 선택지와 예정 시각/)
   ).toHaveCount(0);
 
@@ -402,6 +456,12 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   let scheduleForm = settingsCard.getByRole("group", {
     name: testMedicationName + " 새 복용·알림 시간 입력",
   });
+  await scheduleForm
+    .getByRole("button", { name: "이 시간 추가", exact: true })
+    .click();
+  await expect(scheduleForm.getByRole("alert")).toContainText(
+    "예정 시각을 입력해 주세요."
+  );
   await scheduleForm
     .getByLabel("예정 시각", { exact: true })
     .fill(keptScheduleTime);
@@ -536,7 +596,8 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   ).toBeVisible();
 
   await page
-    .getByRole("link", { name: "첫 화면으로 이동", exact: true })
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "첫 화면", exact: true })
     .click();
   const homeMedicationCard = page.getByRole("article").filter({
     has: page.getByRole("heading", {
@@ -680,7 +741,8 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(page.getByText(/상태를 저장했습니다/)).toBeVisible();
 
   await page
-    .getByRole("link", { name: "첫 화면으로 이동", exact: true })
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "첫 화면", exact: true })
     .click();
   await page
     .getByRole("link", { name: "복용기록 확인", exact: true })
@@ -693,6 +755,49 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(statusSection).toContainText("평소와 같음");
   await expect(statusSection).toContainText("증상 없음");
   await expect(statusSection).toContainText(statusNote);
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "환경설정", exact: true })
+    .click();
+  const medicationToDelete = page.getByRole("article").filter({
+    has: page.getByRole("heading", {
+      level: 3,
+      name: testMedicationName,
+      exact: true,
+    }),
+  });
+  await medicationToDelete
+    .getByRole("button", {
+      name: `${testMedicationName} 등록된 약 삭제`,
+      exact: true,
+    })
+    .click();
+  const medicationDeleteDialog = page.getByRole("dialog", {
+    name: "등록된 약을 삭제할까요?",
+  });
+  await expect(medicationDeleteDialog).toContainText(
+    "기존 복용 기록은 삭제되지 않습니다."
+  );
+  await expect(medicationDeleteDialog).toContainText(
+    "약 이름, 복용 시각, 복용 수량을 계속 확인할 수 있습니다."
+  );
+  await medicationDeleteDialog
+    .getByRole("button", { name: "등록된 약 삭제", exact: true })
+    .click();
+  await expect(medicationToDelete).toHaveCount(0);
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "복용기록", exact: true })
+    .click();
+  const preservedLog = page
+    .getByRole("region", { name: "투약 타임라인" })
+    .getByRole("listitem")
+    .filter({ hasText: editedLogNote });
+  await expect(preservedLog).toContainText(testMedicationName);
+  await expect(preservedLog).toContainText("13:21");
+  await expect(preservedLog).toContainText("1.25정");
 });
 
 test("같은 약을 최근 시각에 다시 저장하면 중복 확인을 거친다", async ({

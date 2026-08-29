@@ -48,6 +48,7 @@ export interface DbRepository {
     patch: UpdateMedicationInput
   ): Promise<Medication>;
   deactivateMedication(careSpaceId: string, id: string): Promise<Medication>;
+  deleteMedication(careSpaceId: string, id: string): Promise<Medication>;
   addSchedule(
     careSpaceId: string,
     input: AddScheduleInput

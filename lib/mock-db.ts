@@ -101,6 +101,7 @@ const memoryDb: DB = {
       name: "메스티논",
       unit: "정",
       active: true,
+      deleted_at: null,
       quantity_options: [0.5, 1, 1.5, 2],
       created_at: SEED_TIME,
       updated_at: SEED_TIME,
@@ -113,6 +114,7 @@ const memoryDb: DB = {
       name: "소론도",
       unit: "정",
       active: true,
+      deleted_at: null,
       quantity_options: [1, 2, 3, 4, 5, 6, 7, 8],
       created_at: SEED_TIME,
       updated_at: SEED_TIME,
@@ -125,6 +127,7 @@ const memoryDb: DB = {
       name: "셉트린정",
       unit: "",
       active: true,
+      deleted_at: null,
       quantity_options: [],
       created_at: SEED_TIME,
       updated_at: SEED_TIME,
@@ -171,12 +174,15 @@ function profileById(userId: string): Profile | null {
 
 function medicationById(
   careSpaceId: string,
-  medicationId: string
+  medicationId: string,
+  includeDeleted = false
 ): Medication {
   return (
     memoryDb.medications.find(
       (medication) =>
-        medication.care_space_id === careSpaceId && medication.id === medicationId
+        medication.care_space_id === careSpaceId &&
+        medication.id === medicationId &&
+        (includeDeleted || medication.deleted_at === null)
     ) ??
     missing("약")
   );
@@ -397,12 +403,28 @@ export class MockDbRepository implements DbRepository {
 
   async fetchAll(careSpaceId: string): Promise<DB> {
     careSpaceById(careSpaceId);
+    const visibleMedicationIds = new Set(
+      memoryDb.medications
+        .filter(
+          (medication) =>
+            medication.care_space_id === careSpaceId &&
+            medication.deleted_at === null
+        )
+        .map((medication) => medication.id)
+    );
     return clone({
       medications: memoryDb.medications
-        .filter((row) => row.care_space_id === careSpaceId)
+        .filter(
+          (row) =>
+            row.care_space_id === careSpaceId && row.deleted_at === null
+        )
         .sort((a, b) => a.created_at.localeCompare(b.created_at)),
       medication_schedules: memoryDb.medication_schedules
-        .filter((row) => row.care_space_id === careSpaceId)
+        .filter(
+          (row) =>
+            row.care_space_id === careSpaceId &&
+            visibleMedicationIds.has(row.medication_id)
+        )
         .sort((a, b) => a.time.localeCompare(b.time)),
       medication_logs: memoryDb.medication_logs
         .filter((row) => row.care_space_id === careSpaceId)
@@ -422,6 +444,7 @@ export class MockDbRepository implements DbRepository {
       memoryDb.medications.some(
         (medication) =>
           medication.care_space_id === careSpaceId &&
+          medication.deleted_at === null &&
           medication.name.toLocaleLowerCase() === input.name.toLocaleLowerCase()
       )
     ) {
@@ -437,6 +460,7 @@ export class MockDbRepository implements DbRepository {
       unit: input.unit,
       quantity_options: [...input.quantity_options],
       active: input.active ?? true,
+      deleted_at: null,
       created_at: timestamp,
       updated_at: timestamp,
     };
@@ -456,6 +480,7 @@ export class MockDbRepository implements DbRepository {
       memoryDb.medications.some(
         (medication) =>
           medication.care_space_id === careSpaceId &&
+          medication.deleted_at === null &&
           medication.id !== medicationId &&
           medication.name.toLocaleLowerCase() === patch.name!.toLocaleLowerCase()
       )
@@ -480,6 +505,35 @@ export class MockDbRepository implements DbRepository {
     medicationId: string
   ): Promise<Medication> {
     return this.updateMedication(careSpaceId, medicationId, { active: false });
+  }
+
+  async deleteMedication(
+    careSpaceId: string,
+    medicationId: string
+  ): Promise<Medication> {
+    const current = medicationById(careSpaceId, medicationId);
+    const timestamp = now();
+    const deleted: Medication = {
+      ...current,
+      active: false,
+      deleted_at: timestamp,
+      updated_by: MOCK_USER_ID,
+      updated_at: timestamp,
+    };
+    replaceById(memoryDb.medications, deleted);
+    memoryDb.medication_schedules = memoryDb.medication_schedules.map(
+      (schedule) =>
+        schedule.care_space_id === careSpaceId &&
+        schedule.medication_id === medicationId
+          ? {
+              ...schedule,
+              active: false,
+              updated_by: MOCK_USER_ID,
+              updated_at: timestamp,
+            }
+          : schedule
+    );
+    return clone(deleted);
   }
 
   async addSchedule(
@@ -615,7 +669,11 @@ export class MockDbRepository implements DbRepository {
     const current = logById(careSpaceId, logId);
     const clean = definedPatch(patch);
     const medicationId = patch.medication_id ?? current.medication_id;
-    const medication = medicationById(careSpaceId, medicationId);
+    const medication = medicationById(
+      careSpaceId,
+      medicationId,
+      medicationId === current.medication_id
+    );
     const scheduleId = hasOwn(patch, "schedule_id")
       ? patch.schedule_id ?? null
       : current.schedule_id;

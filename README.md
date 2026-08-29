@@ -12,9 +12,11 @@
 - 격리: 한 사람의 기록을 하나의 복약 공간(`care space`)으로 분리하고 Supabase RLS로 접근 제한
 - 공유: 소유자가 Gmail·네이버 등 이메일 주소로 보호자 또는 조회자 초대 메일을 보내고, 같은 이메일의 Google 계정으로 로그인한 사용자가 앱 안에서 수락·거절
 - 데이터: 약·일정·투약 로그·하루 상태를 선택한 복약 공간 단위로 조회·저장
-- 기록: 실제 복용 시각·메모, 일정/추가 복용 구분, 수정, soft delete와 실행 취소
+- 기록: 약 이름·실제 복용 시각·수량, 일정/추가 복용 구분, 수정, soft delete와 실행 취소
+- 약 설정: 약·복용 일정 등록·수정·비활성화와 등록 약 삭제, 기존 복용 기록 보존
 - 알림: 환경설정에서 로그인 사용자·기기·접근 가능 복약 공간별 Web Push 수신, 테스트와 해제
 - 환경: 모바일 우선, 온라인 전용, 한국 날짜(`Asia/Seoul`) 기준
+- 입력 UI: shadcn/ui의 모바일 크기 입력·버튼, React Hook Form 상태 관리, Zod 날짜·시간 검증
 - 배포: [bubuuo1/me.drugmgr](https://github.com/bubuuo1/me.drugmgr)의 Vercel Git Integration 사용
 
 새 사용자는 기록이 없는 개인 복약 공간을 받습니다. 다른 사람의 기록은 해당 공간에 초대받은 구성원만 볼 수 있습니다.
@@ -23,6 +25,8 @@
 - `owner`(소유자): 약·일정·구성원·초대를 관리하고 기록을 조회·작성·수정
 - `caregiver`(보호자): 기록을 조회하고 투약 로그·하루 상태를 작성·수정
 - `viewer`(조회자): 기록 조회만 가능
+
+등록 약을 삭제하면 약 목록과 앞으로의 일정·알림에서는 제외되지만, 이미 저장한 복용 기록은 삭제되지 않습니다. `복용기록`에서 기록 당시의 약 이름, 실제 복용 시각, 수량과 단위를 계속 확인할 수 있습니다.
 
 인증 도입 전 데이터는 마이그레이션 시 `기존 데이터 (미지정)` 공간에 보존됩니다. 이 공간은 운영자가 실제 데이터 소유자를 확인해 연결하기 전까지 누구에게도 공개되지 않습니다.
 
@@ -76,7 +80,7 @@ npm run dev
 
 Google·Supabase 설정과 애플리케이션 배포는 별개의 작업입니다. 특히 새 인증 코드를 커밋·푸시해 Vercel Production 배포를 완료하지 않으면 기존 운영 화면에는 Google 로그인 버튼이 나타나지 않습니다.
 
-1. 운영 Supabase DB를 백업한 뒤 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`을 순서대로 적용합니다.
+1. 운영 Supabase DB를 백업한 뒤 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`, `supabase/migrations/20260830050000_soft_delete_medications_preserve_logs.sql`을 순서대로 적용합니다.
 2. 이 저장소의 인증·복약 공간 관련 변경을 함께 커밋하고 GitHub에 푸시합니다. Vercel의 Production 배포가 성공했는지 확인한 뒤, 로그아웃 상태에서 `/` 접속 시 `/login`으로 이동하는지 확인합니다.
 3. Google Cloud에서 외부 사용자용 OAuth 동의 화면과 **웹 애플리케이션** OAuth 클라이언트를 구성합니다. 승인된 JavaScript 원본에는 운영 앱 주소를, 승인된 리디렉션 URI에는 `https://<project-ref>.supabase.co/auth/v1/callback`을 등록합니다.
 4. Supabase Dashboard의 Authentication > Providers > Google에서 Google 공급자를 켜고 Client ID와 Client Secret을 저장합니다. Client Secret은 저장소나 Vercel 공개 환경변수에 넣지 않습니다.

@@ -56,10 +56,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           수락한 뒤에만 볼 수 있습니다.
         </p>
       </section>
-
-      <p className="mt-6 text-center text-sm leading-relaxed text-muted">
-        이 앱은 복용 사실을 기록하며 복용량이나 처방을 판단하지 않습니다.
-      </p>
     </main>
   );
 }

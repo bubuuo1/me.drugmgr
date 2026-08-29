@@ -65,12 +65,13 @@ Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마
 | `unit` | text | 최대 20자, 횟수형 약은 빈 문자열 허용 |
 | `quantity_options` | jsonb | 숫자 수량 선택지 배열, 최대 50개 |
 | `active` | boolean | 기본 `true` |
+| `deleted_at` | timestamptz nullable | 등록 약 soft delete 시각, 설정·일정·알림 조회에서 제외 |
 | `created_by` | uuid nullable | 생성 사용자 감사 필드 |
 | `updated_by` | uuid nullable | 마지막 변경 사용자 감사 필드 |
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 수정 시각 |
 
-약 이름은 같은 복약 공간 안에서 대소문자를 무시해 중복되지 않는다. `quantity_options`의 각 값은 0보다 크고 1000 이하여야 한다. 사용 이력이 있는 약은 물리 삭제하지 않고 비활성화한다.
+삭제되지 않은 약 이름은 같은 복약 공간 안에서 대소문자를 무시해 중복되지 않는다. `quantity_options`의 각 값은 0보다 크고 1000 이하여야 한다. 등록 약 삭제는 `deleted_at`을 설정하고 `active = false`로 바꾸며 연결 일정을 비활성화한다. 약 행과 기존 투약 로그는 물리 삭제하지 않는다.
 
 ## 4. medication_schedules
 
@@ -243,7 +244,7 @@ private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테�
 - 대기 발송의 `scheduled_for` 인덱스
 - 기록된 일정 확인을 위한 `medication_logs(schedule_id, taken_at)` 부분 인덱스
 
-FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 사용 이력이 있는 약과 일정은 애플리케이션에서 비활성화하고 물리 삭제하지 않는다.
+FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 일정 삭제는 기존 로그의 `schedule_id`를 `null`로 바꾸더라도 예정 스냅샷을 보존한다. 약 삭제는 행을 물리 삭제하지 않고 soft delete하여 로그의 약 이름·단위·실제 복용 시각·수량을 계속 조회할 수 있게 한다.
 
 ## 10. 갱신 규칙
 
@@ -257,6 +258,8 @@ FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 사�
 ## 11. 인증·공유 마이그레이션
 
 `20260829110749_add_multi_user_family_auth.sql`은 기존 앱 테이블을 삭제하지 않고 공간·감사 컬럼을 추가한다. 기존 약·일정·로그·상태는 미지정 legacy 공간으로 backfill하고 기존 익명 Push 구독은 안전하게 비활성화한다. 새 사용자와 기존 Auth 사용자는 빈 개인 공간을 받는다.
+
+`20260830050000_soft_delete_medications_preserve_logs.sql`은 약에 `deleted_at`을 추가하고 약 삭제와 연결 일정 비활성화를 하나의 DB 작업으로 처리한다. 기존 투약 로그 행과 약 이름·단위·시각·수량 스냅샷은 변경하지 않는다.
 
 마이그레이션 적용 전 운영 DB를 백업한다. 적용 뒤에는 실제 기존 데이터 소유자를 확인해 미지정 공간에 소유자 멤버십을 수동으로 추가해야 한다. 자동으로 첫 로그인 사용자에게 할당하면 잘못된 사람에게 건강 기록이 노출될 수 있으므로 금지한다.
 

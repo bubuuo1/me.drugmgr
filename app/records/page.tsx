@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { DateNavigator } from "@/app/components/date-navigator";
 import {
   ConfirmDialog,
   ErrorBanner,
@@ -12,9 +13,7 @@ import {
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import {
-  addDays,
   formatDateTime,
-  formatKoreanFullDate,
   formatKstDateTimeInput,
   isToday,
   parseKstDateTimeInput,
@@ -223,6 +222,12 @@ export default function RecordsPage() {
     <main className="flex flex-1 flex-col gap-6">
       <PageHeader title="복용기록 확인" />
 
+      <DateNavigator
+        value={dateKey}
+        onChange={changeDate}
+        inputId="record-date"
+      />
+
       {loading && db.medication_logs.length === 0 ? (
         <LoadingState label="투약 기록을 불러오는 중입니다." />
       ) : (
@@ -275,56 +280,6 @@ export default function RecordsPage() {
               {undo.label} 기록을 삭제했습니다.
             </Notice>
           )}
-
-          <section aria-label="기록 날짜" className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => changeDate(addDays(dateKey, -1))}
-                className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
-                aria-label="이전 날짜"
-              >
-                ‹
-              </button>
-              <div className="text-center">
-                <p className="text-xl font-bold leading-snug text-ink">
-                  {formatKoreanFullDate(dateKey)}
-                </p>
-                {isToday(dateKey) && canWriteRecords && (
-                  <span className="text-base font-bold text-success">오늘</span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => changeDate(addDays(dateKey, 1))}
-                className="flex h-12 min-w-12 items-center justify-center rounded-full border border-hairline bg-canvas px-3 text-xl font-bold text-ink"
-                aria-label="다음 날짜"
-              >
-                ›
-              </button>
-            </div>
-            <div className="grid grid-cols-[1fr_auto] gap-3">
-              <label htmlFor="record-date" className="sr-only">
-                기록 날짜 직접 선택
-              </label>
-              <input
-                id="record-date"
-                type="date"
-                value={dateKey}
-                onChange={(event) => changeDate(event.target.value)}
-                className="min-h-14 min-w-0 rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink focus:border-2 focus:border-ink"
-              />
-              {!isToday(dateKey) && (
-                <button
-                  type="button"
-                  onClick={() => changeDate(toDateKey(new Date()))}
-                  className="min-h-14 rounded-xl border border-ink bg-canvas px-4 text-base font-bold text-ink"
-                >
-                  오늘
-                </button>
-              )}
-            </div>
-          </section>
 
           <section aria-labelledby="timeline-title" className="flex flex-col gap-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">

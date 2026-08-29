@@ -70,6 +70,7 @@ export type Medication = CareSpaceScopedAudit & {
   name: string;
   unit: string;
   active: boolean;
+  deleted_at: string | null;
   quantity_options: number[];
   created_at: string;
   updated_at: string;
@@ -242,10 +243,16 @@ type CareSpaceInviteUpdate = Partial<
 
 type MedicationInsert = Omit<
   Medication,
-  "id" | "created_at" | "updated_at" | "created_by" | "updated_by"
+  | "id"
+  | "deleted_at"
+  | "created_at"
+  | "updated_at"
+  | "created_by"
+  | "updated_by"
 > & {
   id?: string;
   active?: boolean;
+  deleted_at?: string | null;
   created_by?: string | null;
   updated_by?: string | null;
   created_at?: string;
@@ -484,6 +491,10 @@ export type Database = {
       remove_care_space_member: {
         Args: { p_care_space_id: string; p_user_id: string };
         Returns: CareSpaceMember;
+      };
+      soft_delete_medication: {
+        Args: { p_care_space_id: string; p_medication_id: string };
+        Returns: Medication;
       };
       get_pending_care_space_invites: {
         Args: Record<string, never>;

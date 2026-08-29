@@ -17,25 +17,37 @@ type PageHeaderProps = {
 
 export function PageHeader({
   title,
-  backHref = "/",
-  backLabel = "첫 화면",
+  backHref,
+  backLabel = "이전 화면",
   trailing,
 }: PageHeaderProps) {
   return (
-    <header className="grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 pt-1">
-      <Link
-        href={backHref}
-        className="inline-flex min-h-12 max-w-full shrink-0 items-center justify-center rounded-full bg-surface-strong px-3 text-base font-bold text-ink active:bg-hairline-soft min-[400px]:px-4"
-        aria-label={`${backLabel}으로 이동`}
-      >
-        <span aria-hidden="true">‹</span>
-        <span className="ml-1">{backLabel}</span>
-      </Link>
+    <header
+      className={`grid min-h-14 min-w-0 items-center gap-3 pt-1 ${
+        backHref
+          ? "grid-cols-[auto_minmax(0,1fr)]"
+          : "grid-cols-[minmax(0,1fr)]"
+      }`}
+    >
+      {backHref && (
+        <Link
+          href={backHref}
+          className="inline-flex min-h-12 max-w-full shrink-0 items-center justify-center rounded-full bg-surface-strong px-3 text-base font-bold text-ink active:bg-hairline-soft min-[400px]:px-4"
+          aria-label={`${backLabel}으로 이동`}
+        >
+          <span aria-hidden="true">‹</span>
+          <span className="ml-1">{backLabel}</span>
+        </Link>
+      )}
       <h1 className="min-w-0 break-words text-2xl font-bold leading-snug text-ink">
         {title}
       </h1>
       {trailing && (
-        <div className="col-span-2 min-w-0 justify-self-end">{trailing}</div>
+        <div
+          className={`${backHref ? "col-span-2" : ""} min-w-0 justify-self-end`}
+        >
+          {trailing}
+        </div>
       )}
     </header>
   );
