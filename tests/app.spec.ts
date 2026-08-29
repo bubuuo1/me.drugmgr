@@ -92,7 +92,7 @@ test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인
     page.getByRole("link", { name: "기록 확인", exact: true })
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "약 설정", exact: true })
+    page.getByRole("link", { name: "약·일정 관리", exact: true })
   ).toBeVisible();
 });
 
