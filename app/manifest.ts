@@ -25,6 +25,12 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
         purpose: "any",
       },
+      {
+        src: "/notification-badge.png",
+        sizes: "96x96",
+        type: "image/png",
+        purpose: "monochrome",
+      },
     ],
   };
 }

@@ -93,6 +93,20 @@ function isExpiredSubscriptionStatus(status: number | null): boolean {
   return status === 404 || status === 410;
 }
 
+function scheduleReminderMessage(databaseTitle: string): {
+  title: string;
+  body: string;
+} {
+  const suffix = " 예정";
+  const scheduleAndMedication = databaseTitle.endsWith(suffix)
+    ? databaseTitle.slice(0, -suffix.length)
+    : databaseTitle;
+  return {
+    title: `${scheduleAndMedication} 투약 기록 확인`,
+    body: `${scheduleAndMedication} 투약 기록을 확인해 주세요.`,
+  };
+}
+
 async function deliverPush(
   subscription: WebPushSubscription,
   payload: PushMessagePayload,
@@ -148,8 +162,8 @@ export async function sendTestPush(value: unknown): Promise<void> {
     await deliverPush(
       { endpoint: data.endpoint, keys: { p256dh: data.p256dh, auth: data.auth } },
       {
-        title: "투약 관리 알림 테스트",
-        body: "이 기기에서 일정 알림을 받을 수 있습니다.",
+        title: "알림 테스트",
+        body: "이 기기에서 약별 투약 일정 알림을 받을 수 있습니다.",
         icon: "/icon-192x192.png",
         url: "/",
         tag: "medicine-push-test",
@@ -208,6 +222,7 @@ export async function dispatchDuePushNotifications(
       }
 
       const item = prepared.data;
+      const message = scheduleReminderMessage(item.title);
       let success = false;
       let expired = false;
       let responseStatus: number | null = null;
@@ -216,8 +231,8 @@ export async function dispatchDuePushNotifications(
         responseStatus = await deliverPush(
           webPushSubscription(item),
           {
-            title: item.title,
-            body: item.body,
+            title: message.title,
+            body: message.body,
             icon: "/icon-192x192.png",
             url: item.url,
             tag: item.tag,

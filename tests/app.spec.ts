@@ -100,7 +100,7 @@ test("홈에서 빠른 기록, 상태, 복용기록 확인, 설정 진입점이 
   ).toBeVisible();
 });
 
-test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) => {
+test("파비콘, 설치용 앱 아이콘과 알림 배지를 제공한다", async ({ page }) => {
   await page.goto("/");
 
   const assetHrefs = await Promise.all([
@@ -115,6 +115,13 @@ test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) =>
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("image");
   }
+
+  const notificationBadge = await page.request.get("/notification-badge.png");
+  expect(notificationBadge.status()).toBe(200);
+  expect(notificationBadge.headers()["content-type"]).toContain("image/png");
+  const notificationBadgeBytes = await notificationBadge.body();
+  expect(notificationBadgeBytes.readUInt32BE(16)).toBe(96);
+  expect(notificationBadgeBytes.readUInt32BE(20)).toBe(96);
 
   const manifestHref = await page
     .locator('link[rel="manifest"]')
@@ -143,6 +150,12 @@ test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) =>
         type: "image/png",
         purpose: "any",
       },
+      {
+        src: "/notification-badge.png",
+        sizes: "96x96",
+        type: "image/png",
+        purpose: "monochrome",
+      },
     ],
   });
 });
@@ -162,6 +175,8 @@ test("서비스 워커는 오프라인 캐시 없이 푸시 알림만 처리한�
   expect(source).toContain("notification.close()");
   expect(source).toContain("async function displayPushNotification");
   expect(source).toContain("notificationDisplayQueue");
+  expect(source).toContain('badge: "/notification-badge.png"');
+  expect(source).toContain("closeNotificationGroup(event.notification)");
   expect(source).toContain("silent: false");
   expect(source).toContain("vibrate: [300, 150, 300, 150, 500]");
   expect(source).toContain("logicalTag: payload.tag");

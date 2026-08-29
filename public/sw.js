@@ -39,6 +39,7 @@ async function displayPushNotification(payload) {
   await self.registration.showNotification(payload.title, {
     body: payload.body,
     icon: payload.icon,
+    badge: "/notification-badge.png",
     silent: false,
     vibrate: [300, 150, 300, 150, 500],
     data: { url: payload.url, logicalTag: payload.tag },
@@ -47,8 +48,8 @@ async function displayPushNotification(payload) {
 
 self.addEventListener("push", (event) => {
   let payload = {
-    title: "투약 일정 알림",
-    body: "투약 기록을 확인해 주세요.",
+    title: "투약 기록 확인",
+    body: "등록한 약의 투약 기록을 확인해 주세요.",
     icon: "/icon-192x192.png",
     url: "/",
     tag: "medicine-schedule",
@@ -75,8 +76,29 @@ self.addEventListener("push", (event) => {
   event.waitUntil(notificationDisplayQueue);
 });
 
+async function closeNotificationGroup(clickedNotification) {
+  clickedNotification.close();
+  const logicalTag =
+    typeof clickedNotification.data?.logicalTag === "string"
+      ? clickedNotification.data.logicalTag
+      : clickedNotification.tag;
+  if (!logicalTag) return;
+
+  try {
+    const notifications = await self.registration.getNotifications();
+    for (const notification of notifications) {
+      const candidateTag =
+        typeof notification.data?.logicalTag === "string"
+          ? notification.data.logicalTag
+          : notification.tag;
+      if (candidateTag === logicalTag) notification.close();
+    }
+  } catch {
+    // The clicked notification was already closed above.
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
   const requestedPath = event.notification.data?.url;
   const target = new URL(
     typeof requestedPath === "string" ? requestedPath : "/",
@@ -88,15 +110,18 @@ self.addEventListener("notificationclick", (event) => {
       : new URL("/", self.location.origin);
 
   event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then(async (windows) => {
-        const current = windows[0];
-        if (current) {
-          if ("navigate" in current) await current.navigate(safeTarget.href);
-          return current.focus();
-        }
-        return self.clients.openWindow(safeTarget.href);
-      })
+    Promise.all([
+      closeNotificationGroup(event.notification),
+      self.clients
+        .matchAll({ type: "window", includeUncontrolled: true })
+        .then(async (windows) => {
+          const current = windows[0];
+          if (current) {
+            if ("navigate" in current) await current.navigate(safeTarget.href);
+            return current.focus();
+          }
+          return self.clients.openWindow(safeTarget.href);
+        }),
+    ])
   );
 });
