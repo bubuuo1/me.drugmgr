@@ -7,6 +7,11 @@ import { DbProvider } from "@/lib/store";
 export const metadata: Metadata = {
   title: "투약 관리",
   description: "약 복용과 건강 상태를 빠르게 기록하는 개인용 투약 관리 앱",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "투약관리",
+  },
 };
 
 export const viewport: Viewport = {

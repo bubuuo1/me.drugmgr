@@ -10,6 +10,7 @@
 - 인증: 로그인, 접근 코드, 기기 승인 없음
 - 저장소: Supabase가 유일한 영구 저장소
 - 네트워크: 온라인 전용
+- 알림: 사용자가 허용한 기기마다 브라우저 Web Push 구독 사용
 - 배포: Vercel 프로젝트의 Git Integration 사용
 - GitHub: [bubuuo1/me.drugmgr](https://github.com/bubuuo1/me.drugmgr)
 
@@ -37,14 +38,17 @@ URL을 아는 사람은 같은 데이터에 접근할 수 있습니다. URL은 �
 - 날짜별 상태 수정·삭제
 - 약 및 복용 스케줄 설정
 - 날짜별 투약+상태 타임라인
+- 활성 일정의 기기별 Web Push 알림과 테스트·해제(완료)
 - 모바일·키보드·화면 낭독기 접근성
+
+알림은 설정 화면에서 각 기기 사용자가 직접 켜고 테스트하거나 끕니다. 활성 일정의 예정 시각에만 발송을 시도하고, 그날 같은 일정의 투약 기록이 이미 있으면 건너뜁니다. iPhone/iPad는 iOS/iPadOS 16.4 이상에서 Safari로 홈 화면에 추가한 앱을 사용해야 합니다. 알림은 기록을 확인하라는 안내이며 미복용 여부를 판정하지 않고, 네트워크와 기기 설정에 따라 늦거나 도착하지 않을 수 있습니다.
 
 ### 명시적 제외
 
 - 로그인, 접근 코드, 기기 승인
 - localStorage, IndexedDB, 오프라인 캐시, 오프라인 큐, 동기화
 - 백업·복원, CSV/PDF 내보내기
-- 리마인더·푸시 알림, 미복용 판정
+- 미복용·지연 복용 판정과 알림의 정시 도착 보장
 - 통계·그래프·추이 분석
 - 역할별 권한, 보호자 초대·공유 관리
 - AI 분석, 의료 판단, 복용량·처방 추천
@@ -64,9 +68,15 @@ npm ci
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR-PUBLISHABLE-KEY
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=YOUR-PUBLIC-VAPID-KEY
+VAPID_PRIVATE_KEY=YOUR-PRIVATE-VAPID-KEY
+VAPID_SUBJECT=https://YOUR-DEPLOYMENT.example
+PUSH_DISPATCH_SECRET=YOUR-RANDOM-DISPATCH-SECRET
 ```
 
 기존 프로젝트가 legacy anon key를 사용하면 `NEXT_PUBLIC_SUPABASE_ANON_KEY`를 호환 변수로 사용할 수 있습니다. publishable/anon 키는 브라우저 공개용이며, service role key는 클라이언트 환경변수에 넣지 않습니다.
+
+VAPID private key와 발송 비밀값은 서버 전용입니다. 운영 환경에서는 Vercel 환경변수에 저장하고, Supabase Vault에는 발송 URL과 같은 `PUSH_DISPATCH_SECRET`을 저장합니다. 알림 발송 스케줄은 Supabase Cron이 매분 Vercel API를 호출합니다.
 
 ```bash
 npm run dev

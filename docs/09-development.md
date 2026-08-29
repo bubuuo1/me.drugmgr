@@ -10,6 +10,15 @@
 
 새 Vercel 계정에 `me-drugmgr` 프로젝트를 만들고 `bubuuo1/me.drugmgr`를 Git Integration으로 연결해 Preview/Production 배포 흐름을 사용한다.
 
+Web Push 운영에는 다음 서버 설정이 필요하다.
+
+- Vercel 공개 변수: `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
+- Vercel 서버 전용 변수: `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `PUSH_DISPATCH_SECRET`
+- Supabase Vault: `push_dispatch_url`, Vercel과 같은 `push_dispatch_secret`
+- Supabase migration: `pg_cron`, `pg_net`, private push 테이블·RPC와 `medicine-push-dispatch` 매분 작업
+
+service role key는 사용하지 않는다. VAPID private key와 발송 비밀값을 Git, `.env.example`의 실제 값, 브라우저 변수 또는 GitHub Actions secret에 복사하지 않는다.
+
 ## 2. P0 — 데이터 정확성과 운영 기반
 
 ### Phase 0.1 스키마 reset
@@ -102,6 +111,22 @@
 - [ ] 포커스 관리
 - [ ] 색상 외 상태 텍스트
 
+### Phase 1.6 PWA Web Push — 완료
+
+- [x] manifest의 앱 id·scope와 홈 화면 아이콘
+- [x] 캐시 없는 push 전용 서비스 워커
+- [x] 설정 화면의 기기별 알림 켜기·테스트·끄기
+- [x] iOS/iPadOS 16.4 이상 홈 화면 설치 안내
+- [x] private 구독·발송 테이블과 제한 RPC
+- [x] Vault 비밀값을 사용하는 Supabase 매분 Cron
+- [x] Vercel 발송 API의 Bearer 비밀값 검증
+- [x] 활성 일정 대상 생성과 이미 기록한 일정 건너뛰기
+- [x] 기기·일정·예정 시각 중복 방지
+- [x] 중단·일시 실패 시 5분 이내 최대 3회 재시도와 시도 번호 검증
+- [x] 만료 구독 비활성화와 전송 결과 기록
+- [x] 알림 클릭 시 해당 투약 기록 화면 열기
+- [x] 알림 지연 가능성과 미복용 판정 아님을 안내
+
 ## 4. 테스트 전략
 
 ### 단위·통합 테스트 대상
@@ -132,6 +157,10 @@ Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 
 - 날짜 이동과 기록 조회
 - P1 수정·soft delete·실행 취소
 - 약·일정 설정 후 과거 로그 불변
+- manifest의 PWA id·scope와 push 전용 서비스 워커 제공
+- 서비스 워커에 `push`, `notificationclick`이 있고 앱/API `fetch` 캐시가 없음
+- 설정 화면의 알림 상태와 기기별 제어
+- 비밀값이 없거나 잘못된 Vercel 발송 API 요청 거부
 
 ## 5. GitHub Actions CI
 
@@ -144,7 +173,7 @@ Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 
 5. Playwright Chromium 설치
 6. `NEXT_PUBLIC_USE_MOCK_DB=true npm run test:e2e`
 
-CI에는 Supabase 운영 URL/key와 Vercel 배포 토큰이 필요하지 않다. Actions에서 `vercel deploy`를 실행하지 않는다.
+CI에는 Supabase 운영 URL/key, VAPID private key, 발송 비밀값과 Vercel 배포 토큰이 필요하지 않다. Playwright 실행기는 브라우저 경로 검증에만 쓰는 테스트용 공개 VAPID key와 발송 비밀값을 프로세스 환경에 제공하며 실제 Push 구독이나 운영 발송을 만들지 않는다. Actions에서 `vercel deploy`를 실행하지 않는다.
 
 ## 6. 로컬 완료 검사
 
@@ -171,6 +200,9 @@ npx playwright install chromium
 - 실패한 쓰기를 성공으로 표시하지 않음
 - 반복 제출로 중복 로그가 생기지 않음
 - 한국 날짜 경계와 과거 스냅샷 테스트 통과
+- push 서비스 워커가 앱/API 요청을 오프라인 캐시하지 않음
+- 발송 API, Supabase 발송 RPC와 Cron 비밀값이 브라우저나 Git 저장소에 노출되지 않음
+- 이미 기록한 일정과 중복 발송이 DB 규칙으로 제외됨
 - P0/P1 제외 기능을 새 의존성이나 UI로 추가하지 않음
 
 ## 8. 명시적 제외
@@ -178,7 +210,7 @@ npx playwright install chromium
 - 인증, 접근 코드, 기기 승인
 - localStorage, IndexedDB, 오프라인 캐시·큐·동기화
 - 백업·복원, CSV/PDF
-- 리마인더·푸시 알림, 미복용 판정
+- 미복용·지연 복용 판정과 알림의 정시·필수 도착 보장
 - 통계·그래프·추이
 - 역할·초대·공유 관리
 - AI 분석과 의료 판단

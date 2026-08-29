@@ -126,6 +126,10 @@ test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) =>
   expect(manifestResponse.status()).toBe(200);
   const manifest = await manifestResponse.json();
   expect(manifest).toMatchObject({
+    id: "/",
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
     icons: [
       {
         src: "/icon-192x192.png",
@@ -141,6 +145,37 @@ test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) =>
       },
     ],
   });
+});
+
+test("서비스 워커는 오프라인 캐시 없이 푸시 알림만 처리한다", async ({
+  page,
+}) => {
+  const response = await page.request.get("/sw.js");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("application/javascript");
+  expect(response.headers()["cache-control"]).toContain("no-store");
+
+  const source = await response.text();
+  expect(source).toContain('addEventListener("push"');
+  expect(source).toContain('addEventListener("notificationclick"');
+  expect(source).not.toContain('addEventListener("fetch"');
+});
+
+test("설정에서 기기 알림을 관리하고 발송 API는 비밀값을 요구한다", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const notificationSection = page.locator("section").filter({
+    has: page.getByRole("heading", { level: 2, name: "투약 일정 알림" }),
+  });
+  await expect(notificationSection).toBeVisible();
+  await expect(notificationSection).toContainText(/일정 알림/);
+
+  const unauthorized = await page.request.post("/api/push/dispatch", {
+    headers: { Authorization: "Bearer wrong-secret" },
+  });
+  expect(unauthorized.status()).toBe(401);
+  expect(unauthorized.headers()["cache-control"]).toContain("no-store");
 });
 
 test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 이어진다", async ({

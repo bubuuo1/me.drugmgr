@@ -8,12 +8,17 @@
 - P0 스키마는 기존 개발 데이터를 보존하지 않고 reset하여 적용한다.
 - 브라우저 영구 저장소와 별도 동기화 테이블은 만들지 않는다.
 
-기본 테이블은 다음 네 개다.
+공개 앱 데이터 테이블은 다음 네 개다.
 
 - `medications`
 - `medication_schedules`
 - `medication_logs`
 - `daily_status`
+
+Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마의 다음 테이블에 저장한다.
+
+- `push_subscriptions`
+- `push_deliveries`
 
 ## 2. medications
 
@@ -98,15 +103,72 @@ insert trigger가 현재 약 이름·단위와 연결 일정 시각을 스냅샷
 
 피로·근력은 `좋음/보통/나쁨`, 호흡은 `편안함/평소와 다름`, 눈 증상은 `없음/있음` 또는 `null`만 허용한다. 메모는 최대 2000자다.
 
-## 6. 시간대 규칙
+## 6. Web Push 운영 데이터 — P1 완료
+
+### 6.1 `private.push_subscriptions`
+
+브라우저가 발급한 기기별 Web Push 구독을 저장한다.
+
+| 필드 | 형식 | 규칙 |
+|---|---|---|
+| `id` | uuid | PK |
+| `endpoint` | text | push service HTTPS endpoint, unique |
+| `p256dh` | text | 브라우저 공개 암호화 키 |
+| `auth` | text | 구독 인증용 값 |
+| `expiration_time` | timestamptz nullable | 브라우저가 제공한 만료 시각 |
+| `disabled_at` | timestamptz nullable | 해제·만료된 구독 표시 |
+| `last_seen_at` | timestamptz | 마지막 등록 확인 시각 |
+| `last_success_at` | timestamptz nullable | 마지막 push service 접수 시각 |
+| `last_failure_at` | timestamptz nullable | 마지막 전송 실패 시각 |
+| `created_at` | timestamptz | 생성 시각 |
+| `updated_at` | timestamptz | 마지막 수정 시각 |
+
+같은 endpoint를 다시 등록하면 키와 만료 시각을 갱신하고 활성화한다. 사용자가 알림을 끄거나 push service가 `404/410`으로 구독 만료를 알리면 `disabled_at`을 기록한다. 이 행은 사용자 계정이나 승인 기기를 뜻하지 않는다.
+
+### 6.2 `private.push_deliveries`
+
+일정 알림의 중복 생성 방지와 전송 결과를 저장한다.
+
+| 필드 | 형식 | 규칙 |
+|---|---|---|
+| `id` | uuid | PK |
+| `subscription_id` | uuid | `private.push_subscriptions.id` FK |
+| `schedule_id` | uuid | `medication_schedules.id` FK |
+| `scheduled_for` | timestamptz | 해당 한국 날짜의 예정 순간 |
+| `status` | text | `pending / accepted / failed / skipped` |
+| `attempt_count` | smallint | 전송 시도 횟수 |
+| `response_status` | integer nullable | push service 응답 상태 |
+| `error_code` | text nullable | 제한된 운영 오류 코드 |
+| `attempted_at` | timestamptz nullable | 전송 시도 시각 |
+| `accepted_at` | timestamptz nullable | push service 접수 시각 |
+| `created_at` | timestamptz | 생성 시각 |
+| `updated_at` | timestamptz | 마지막 수정 시각 |
+
+`subscription_id + schedule_id + scheduled_for`는 unique다. 같은 한국 날짜에 같은 일정의 삭제되지 않은 투약 로그가 있으면 `skipped`를 만들고 발송하지 않는다. `accepted`는 push service가 요청을 접수했다는 의미이며 기기에 정시에 표시되었음을 보장하지 않는다.
+
+새 발송은 1회차 시도 번호와 함께 점유한다. 요청 중단이나 일시 실패가 발생하면 예정 시각부터 5분 이내에 최대 3회까지 같은 delivery 행을 다시 점유하며, 시도 번호가 맞는 결과만 완료 처리한다. 같은 notification tag를 사용해 재시도 알림이 기기에서 교체될 수 있게 한다.
+
+### 6.3 RPC, Cron과 Vault
+
+- 서버의 구독 등록·해제·테스트 처리는 제한된 공개 RPC `register_push_subscription`, `unregister_push_subscription`, `get_push_subscription_for_test`를 사용한다.
+- `claim_due_push_notifications`는 활성 약의 활성 일정 중 최근 3분 범위에 도래한 건을 한국 시각으로 계산하고 중복 없이 발송 대상을 만든다.
+- `complete_push_delivery`는 Vercel 발송 결과를 기록하며 만료된 구독을 비활성화할 수 있다.
+- 알림 관련 모든 RPC는 Supabase Vault에 정확히 하나만 존재하는 `push_dispatch_secret`과 일치하는 값이 없으면 실행을 거부한다.
+- Supabase Cron 작업 `medicine-push-dispatch`가 매분 `pg_net`으로 Vault의 발송 URL을 호출한다.
+- Vercel 발송 API는 같은 비밀값을 Bearer 헤더로 확인한 뒤 Web Push를 전송한다.
+
+private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테이블 권한을 주지 않는다. private 스키마는 Data API에 노출하지 않으며 브라우저와 서버는 필요한 RPC만 사용한다. 발송 비밀값은 테이블이나 애플리케이션 코드에 저장하지 않고 Supabase Vault와 Vercel 서버 환경변수에만 둔다.
+
+## 7. 시간대 규칙
 
 - `created_at`, `updated_at`, `taken_at`, `deleted_at`은 절대 순간인 `timestamptz`다.
 - 화면에는 `Asia/Seoul`로 변환해 표시한다.
 - 투약 로그의 날짜별 조회는 `taken_at`을 한국 시간으로 변환한 달력 날짜를 사용한다.
 - `daily_status.date`와 일정 `time`은 이미 한국 현지 날짜·시각 의미다.
 - 클라이언트의 브라우저 시간대가 달라도 날짜 경계는 한국 기준으로 유지한다.
+- 알림 `scheduled_for`는 해당 한국 날짜와 일정 `time`을 `Asia/Seoul` 순간으로 변환해 저장한다.
 
-## 7. 인덱스와 제약
+## 8. 인덱스와 제약
 
 필수:
 
@@ -119,29 +181,34 @@ insert trigger가 현재 약 이름·단위와 연결 일정 시각을 스냅샷
 - `medications(lower(name))` unique
 - `medication_schedules(medication_id, time)` unique
 - 수량 양수 check 제약
+- `private.push_subscriptions(endpoint)` unique
+- 활성 push 구독의 `last_seen_at` 인덱스
+- `private.push_deliveries(subscription_id, schedule_id, scheduled_for)` unique
+- 대기 발송의 `scheduled_for` 인덱스
+- 기록된 일정 확인을 위한 `medication_logs(schedule_id, taken_at)` 부분 인덱스
 
 FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 사용 이력이 있는 약과 일정은 애플리케이션에서 비활성화하고 물리 삭제하지 않는다.
 
-## 8. 갱신 규칙
+## 9. 갱신 규칙
 
 - `updated_at`은 DB trigger로 갱신한다.
 - 투약 로그 스냅샷은 insert 시 DB trigger로 채우고 이후 자동 갱신하지 않는다.
 - soft delete는 `deleted_at`만 설정한다.
 - 실행 취소는 같은 행의 `deleted_at`을 `null`로 복원한다.
+- push 구독과 발송의 `updated_at`도 DB trigger로 갱신한다.
 
-## 9. P0와 P1
+## 10. P0와 P1
 
 P0에서 스키마, 제약, 스냅샷 trigger, 중복 방지를 먼저 완성한다. `deleted_at`, 메모, 일정 연결 등 P1 필드도 P0 스키마에 포함해 다시 reset하지 않고 P1 UI를 개발할 수 있게 한다.
 
-P1에서는 이 구조 위에 약·일정 설정, 실제 시각·메모 편집, soft delete·실행 취소, 날짜별 타임라인을 추가한다.
+P1에서는 이 구조 위에 약·일정 설정, 실제 시각·메모 편집, soft delete·실행 취소, 날짜별 타임라인을 추가한다. Web Push 운영 테이블, 제한된 RPC, Vault, 매분 Cron과 Vercel 발송 API 연동도 P1에 완료한다.
 
-## 10. 제외 데이터
+## 11. 제외 데이터
 
 다음 테이블이나 필드는 만들지 않는다.
 
 - 사용자, 가족 구성원, 역할, 초대
 - 접근 코드와 승인 기기
-- 알림과 리마인더
 - 오프라인 작업, 동기화 큐, 충돌 로그
 - 백업·복원·내보내기 작업
 - 통계·분석 결과

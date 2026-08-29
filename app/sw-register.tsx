@@ -4,14 +4,9 @@ import { useEffect } from "react";
 
 export function ServiceWorkerRegistration() {
   useEffect(() => {
-    // 이 앱은 온라인 전용이다. 이전 MVP에서 등록한 서비스 워커와
-    // 앱 셸 캐시가 오프라인 화면을 계속 제공하지 않도록 정리한다.
     if ("serviceWorker" in navigator) {
       void navigator.serviceWorker
-        .getRegistrations()
-        .then((registrations) =>
-          Promise.all(registrations.map((registration) => registration.unregister()))
-        )
+        .register("/sw.js", { scope: "/", updateViaCache: "none" })
         .catch(() => undefined);
     }
 

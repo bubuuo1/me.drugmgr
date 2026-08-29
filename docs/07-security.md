@@ -25,6 +25,14 @@ publishable/anon key는 브라우저에 공개되는 키다. `service_role`, `sb
 
 운영 모드에서 URL 또는 공개 키가 없거나 비밀 키 형식이 들어오면 앱은 Supabase 클라이언트를 만들지 않고 설정 오류를 표시한다.
 
+Web Push에서 `NEXT_PUBLIC_VAPID_PUBLIC_KEY`는 브라우저에 공개해도 되는 키다. 다음 값은 서버 전용이며 코드나 `NEXT_PUBLIC_*` 변수에 넣지 않는다.
+
+- `VAPID_PRIVATE_KEY`: Vercel 환경변수
+- `PUSH_DISPATCH_SECRET`: Vercel 환경변수와 Supabase Vault에 동일하게 저장
+- push 발송 URL: Supabase Vault
+
+이 기능은 service role key를 사용하지 않는다. Supabase Cron의 요청과 Vercel 발송 API, 발송용 RPC는 `PUSH_DISPATCH_SECRET`으로 연결한다.
+
 ## 3. RLS의 역할과 한계
 
 모든 공개 테이블에 RLS를 활성화하고 anon 역할에 필요한 연산만 명시적으로 허용한다.
@@ -38,6 +46,8 @@ publishable/anon key는 브라우저에 공개되는 키다. `service_role`, `sb
 P1에서 약·일정 설정과 기록 수정·삭제를 지원하므로 해당 기능을 쓰는 모든 URL 방문자도 같은 연산 권한을 가진다. 사용자별 `auth.uid()` 격리를 제공한다고 주장하지 않는다.
 
 테이블마다 `select`, `insert`, `update`, `delete` 정책을 개별 검토한다. 정책 테스트는 허용 동작뿐 아니라 허용하지 않은 테이블·연산이 거부되는지도 확인한다.
+
+Web Push 구독과 발송 이력은 Data API에 노출하지 않는 `private` 스키마에 두고 RLS를 활성화한다. `anon`과 `authenticated`에는 private 테이블 권한을 주지 않는다. 서버의 알림 설정 처리는 구독 등록·해제·테스트용 제한 RPC만 사용하며, 이들을 포함한 모든 알림 RPC는 Vault의 발송 비밀값이 일치해야 실행된다.
 
 ## 4. DB가 보장할 규칙
 
@@ -61,6 +71,8 @@ P1에서 약·일정 설정과 기록 수정·삭제를 지원하므로 해당 �
 - 네트워크 요청 실패 내용을 큐에 보관하지 않는다.
 - 페이지 새로고침 후 데이터는 Supabase에서 다시 조회한다.
 
+Web Push를 켠 경우에는 예외적으로 브라우저가 서비스 워커, 알림 권한과 Push 구독을 관리한다. 서비스 워커에는 `fetch` 캐시 핸들러가 없으며 앱 화면, API 응답, 투약·상태 데이터를 저장하지 않는다. Push 구독은 알림 전달 경로일 뿐 로그인 세션이나 승인 기기 증명이 아니다.
+
 Playwright mock DB도 테스트 프로세스의 메모리에만 존재하고 실제 Supabase나 브라우저 영구 저장소를 사용하지 않는다.
 
 ## 6. 개인정보 최소화
@@ -70,6 +82,8 @@ Playwright mock DB도 테스트 프로세스의 메모리에만 존재하고 실
 - 이름, 주민등록번호, 주소, 전화번호를 요구하지 않는다.
 - 메모에 불필요한 식별정보를 쓰지 않도록 안내한다.
 - 오류·분석 로그에 약 메모나 상태 내용을 보내지 않는다.
+- push payload에는 상태 기록이나 사용자가 작성한 메모를 넣지 않는다.
+- 알림 제목의 예정 시각과 약 이름은 기기 알림 화면에 보일 수 있으므로 화면 잠금 알림 노출 범위는 해당 기기 설정을 따른다.
 - 브라우저 콘솔에 Supabase 응답 전체나 환경변수를 출력하지 않는다.
 - 화면 공유·공용 기기 사용 시 건강 기록이 노출될 수 있음을 운영자가 이해해야 한다.
 

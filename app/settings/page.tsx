@@ -10,6 +10,7 @@ import {
   PageHeader,
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
+import { PushNotificationsCard } from "@/app/settings/push-notifications-card";
 import { useDb } from "@/lib/store";
 import type { Medication, MedicationSchedule } from "@/lib/types";
 import { isBooleanOnly } from "@/lib/types";
@@ -325,6 +326,8 @@ export default function SettingsPage() {
         처방받은 약 이름, 수량 선택지와 예정 시각을 그대로 입력해 주세요. 앱은
         복용량이나 일정을 추천하지 않습니다. 설정을 바꿔도 과거 기록은 유지됩니다.
       </p>
+
+      <PushNotificationsCard online={online} />
 
       {loading && (
         <p role="status" className="text-center text-base font-semibold text-body">

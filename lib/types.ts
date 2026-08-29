@@ -237,7 +237,56 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      register_push_subscription: {
+        Args: {
+          p_auth: string;
+          p_dispatch_secret: string;
+          p_endpoint: string;
+          p_expiration_time?: string | null;
+          p_p256dh: string;
+        };
+        Returns: boolean;
+      };
+      unregister_push_subscription: {
+        Args: { p_auth: string; p_dispatch_secret: string; p_endpoint: string };
+        Returns: boolean;
+      };
+      get_push_subscription_for_test: {
+        Args: {
+          p_auth: string;
+          p_dispatch_secret: string;
+          p_endpoint: string;
+        };
+        Returns: Array<{ auth: string; endpoint: string; p256dh: string }>;
+      };
+      claim_due_push_notifications: {
+        Args: { p_dispatch_secret: string; p_now: string };
+        Returns: Array<{
+          attempt_count: number;
+          auth: string;
+          body: string;
+          delivery_id: string;
+          endpoint: string;
+          p256dh: string;
+          tag: string;
+          title: string;
+          url: string;
+        }>;
+      };
+      complete_push_delivery: {
+        Args: {
+          p_attempt_count: number;
+          p_delivery_id: string;
+          p_disable_subscription?: boolean;
+          p_dispatch_secret: string;
+          p_error_code?: string | null;
+          p_response_status?: number | null;
+          p_success: boolean;
+        };
+        Returns: boolean;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
