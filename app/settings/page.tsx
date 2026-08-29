@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ConfirmDialog,
@@ -70,6 +71,7 @@ export default function SettingsPage() {
     addSchedule,
     updateSchedule,
     deleteSchedule,
+    canManageSettings,
   } = useDb();
 
   const [addingMedication, setAddingMedication] = useState(false);
@@ -319,6 +321,83 @@ export default function SettingsPage() {
       <main className="flex flex-1 flex-col gap-6">
         <PageHeader title="약과 일정 설정" />
         <LoadingState label="약 설정을 불러오는 중입니다." />
+      </main>
+    );
+  }
+
+  if (!canManageSettings) {
+    return (
+      <main className="flex flex-1 flex-col gap-7">
+        <PageHeader title="약과 일정 설정" />
+        <PushNotificationsCard online={online} />
+        <Notice>
+          약과 일정은 이 가족 공간의 소유자만 변경할 수 있습니다. 현재는 등록된
+          설정을 조회하고 이 기기의 알림 수신 여부를 관리할 수 있습니다.
+        </Notice>
+        <section aria-labelledby="medication-list-title" className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="medication-list-title" className="text-xl font-bold text-ink">
+              등록된 약과 일정
+            </h2>
+            <Link
+              href="/family"
+              className="inline-flex min-h-12 items-center justify-center rounded-full border border-hairline bg-canvas px-4 text-base font-bold text-ink"
+            >
+              가족 권한 보기
+            </Link>
+          </div>
+          {medications.length === 0 ? (
+            <p className="rounded-2xl border border-hairline px-5 py-5 text-lg text-muted">
+              등록된 약이 없습니다.
+            </p>
+          ) : (
+            medications.map((medication) => {
+              const schedules = db.medication_schedules
+                .filter((schedule) => schedule.medication_id === medication.id)
+                .sort((a, b) => a.time.localeCompare(b.time));
+              return (
+                <article
+                  key={medication.id}
+                  className="rounded-2xl border border-hairline bg-canvas px-5 py-5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xl font-bold text-ink">{medication.name}</h3>
+                    <span className="rounded-full bg-surface-soft px-3 py-1 text-sm font-bold text-body">
+                      {medication.active ? "사용 중" : "비활성"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-base text-body">
+                    {isBooleanOnly(medication)
+                      ? "복용 여부만 기록"
+                      : `단위 ${medication.unit} · 선택지 ${medication.quantity_options.join(", ")}`}
+                  </p>
+                  <h4 className="mt-5 border-t border-hairline-soft pt-4 text-lg font-bold text-ink">
+                    복용·알림 시간
+                  </h4>
+                  {schedules.length === 0 ? (
+                    <p className="mt-2 text-base text-muted">등록된 일정이 없습니다.</p>
+                  ) : (
+                    <ul className="mt-3 flex flex-col gap-2">
+                      {schedules.map((schedule) => (
+                        <li
+                          key={schedule.id}
+                          className="flex items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3"
+                        >
+                          <span className="text-lg font-bold text-ink">
+                            {schedule.time}
+                          </span>
+                          <span className="text-base font-semibold text-body">
+                            {schedule.active ? "사용 중" : "비활성"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </section>
       </main>
     );
   }

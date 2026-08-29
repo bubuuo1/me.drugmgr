@@ -68,6 +68,7 @@ export default function RecordsPage() {
     updateLog,
     deleteLog,
     restoreLog,
+    canWriteRecords,
   } = useDb();
   const [dateKey, setDateKey] = useState(() => toDateKey(new Date()));
   const [editId, setEditId] = useState<string | null>(null);
@@ -244,13 +245,18 @@ export default function RecordsPage() {
             }}
           />
 
-          {!online && (
+          {!canWriteRecords && (
+            <Notice>
+              이 가족 공간에서는 기록을 조회만 할 수 있습니다.
+            </Notice>
+          )}
+          {!online && canWriteRecords && (
             <Notice tone="warning">
               인터넷 연결이 없어 기록을 수정·삭제·복원할 수 없습니다.
             </Notice>
           )}
           {success && <Notice tone="success">{success}</Notice>}
-          {undo && (
+          {undo && canWriteRecords && (
             <Notice
               tone="warning"
               action={
@@ -284,7 +290,7 @@ export default function RecordsPage() {
                 <p className="text-xl font-bold leading-snug text-ink">
                   {formatKoreanFullDate(dateKey)}
                 </p>
-                {isToday(dateKey) && (
+                {isToday(dateKey) && canWriteRecords && (
                   <span className="text-base font-bold text-success">오늘</span>
                 )}
               </div>
@@ -393,26 +399,28 @@ export default function RecordsPage() {
                         </p>
                       )}
 
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            editing ? setEditId(null) : startEdit(log)
-                          }
-                          disabled={pendingKey !== null || !online}
-                          className="flex min-h-12 items-center justify-center rounded-full border border-hairline bg-canvas px-4 text-base font-bold text-ink"
-                        >
-                          {editing ? "수정 취소" : "수정"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(log)}
-                          disabled={pendingKey !== null || !online}
-                          className="flex min-h-12 items-center justify-center rounded-full border border-warning bg-canvas px-4 text-base font-bold text-warning"
-                        >
-                          삭제
-                        </button>
-                      </div>
+                      {canWriteRecords && (
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              editing ? setEditId(null) : startEdit(log)
+                            }
+                            disabled={pendingKey !== null || !online}
+                            className="flex min-h-12 items-center justify-center rounded-full border border-hairline bg-canvas px-4 text-base font-bold text-ink"
+                          >
+                            {editing ? "수정 취소" : "수정"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(log)}
+                            disabled={pendingKey !== null || !online}
+                            className="flex min-h-12 items-center justify-center rounded-full border border-warning bg-canvas px-4 text-base font-bold text-warning"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      )}
 
                       {editing && (
                         <form
@@ -552,7 +560,11 @@ export default function RecordsPage() {
                 href={"/status?date=" + dateKey}
                 className="flex min-h-12 items-center justify-center rounded-full border border-ink bg-canvas px-4 text-base font-bold text-ink"
               >
-                {status ? "상태 수정" : "상태 기록"}
+                {canWriteRecords
+                  ? status
+                    ? "상태 수정"
+                    : "상태 기록"
+                  : "상태 보기"}
               </Link>
             </div>
             {status ? (
@@ -597,7 +609,7 @@ export default function RecordsPage() {
         </>
       )}
 
-      {confirmDelete && (
+      {confirmDelete && canWriteRecords && (
         <ConfirmDialog
           title="투약 기록을 삭제할까요?"
           description={

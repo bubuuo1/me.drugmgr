@@ -8,7 +8,16 @@ import { useDb } from "@/lib/store";
 import { isBooleanOnly } from "@/lib/types";
 
 export default function Home() {
-  const { db, loading, error, refresh, clearError } = useDb();
+  const {
+    db,
+    loading,
+    error,
+    refresh,
+    clearError,
+    canManageSettings,
+    canWriteRecords,
+    initialized,
+  } = useDb();
   const [refreshing, setRefreshing] = useState(false);
   const today = toDateKey(new Date());
 
@@ -63,7 +72,7 @@ export default function Home() {
     }
   }
 
-  if (loading && medications.length === 0) {
+  if (!initialized) {
     return (
       <main className="flex flex-1 flex-col gap-6">
         <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
@@ -102,12 +111,14 @@ export default function Home() {
         {medications.length === 0 ? (
           <div className="rounded-2xl border border-hairline px-5 py-5">
             <p className="text-lg font-semibold text-body">활성화된 약이 없습니다.</p>
-            <Link
-              href="/settings"
-              className="mt-4 inline-flex min-h-12 items-center justify-center rounded-full bg-primary-active px-5 text-base font-bold text-on-primary"
-            >
-              약 등록하기
-            </Link>
+            {canManageSettings && (
+              <Link
+                href="/settings"
+                className="mt-4 inline-flex min-h-12 items-center justify-center rounded-full bg-primary-active px-5 text-base font-bold text-on-primary"
+              >
+                약 등록하기
+              </Link>
+            )}
           </div>
         ) : (
           medications.map((medication) => {
@@ -147,16 +158,22 @@ export default function Home() {
                       : `오늘 합계 ${total}${medication.unit}`}
                   </span>
                 </div>
-                <Link
-                  href={href}
-                  className="mt-4 flex min-h-[4.5rem] w-full flex-col items-center justify-center rounded-full bg-primary-active px-6 text-center text-xl font-bold text-on-primary active:bg-ink"
-                >
-                  {nextSchedule
-                    ? `${nextSchedule.time} 예정 기록`
-                    : schedules.length > 0
-                      ? "추가 복용 기록"
-                      : "복용 기록"}
-                </Link>
+                {canWriteRecords ? (
+                  <Link
+                    href={href}
+                    className="mt-4 flex min-h-[4.5rem] w-full flex-col items-center justify-center rounded-full bg-primary-active px-6 text-center text-xl font-bold text-on-primary active:bg-ink"
+                  >
+                    {nextSchedule
+                      ? `${nextSchedule.time} 예정 기록`
+                      : schedules.length > 0
+                        ? "추가 복용 기록"
+                        : "복용 기록"}
+                  </Link>
+                ) : (
+                  <p className="mt-4 flex min-h-14 w-full items-center justify-center rounded-full bg-surface-soft px-5 text-center text-base font-bold text-body">
+                    조회 전용 · 기록 추가 불가
+                  </p>
+                )}
               </article>
             );
           })
@@ -223,7 +240,7 @@ export default function Home() {
                       </div>
                       <span className="font-bold text-success">기록됨</span>
                     </div>
-                  ) : (
+                  ) : canWriteRecords ? (
                     <Link
                       href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}`}
                       className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 active:bg-surface-soft"
@@ -235,6 +252,13 @@ export default function Home() {
                       </div>
                       <span className="font-bold text-muted">기록하기</span>
                     </Link>
+                  ) : (
+                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3">
+                      <p className="text-lg font-bold text-ink">
+                        {schedule.time} · {medication.name}
+                      </p>
+                      <span className="font-bold text-muted">아직 기록 없음</span>
+                    </div>
                   )}
                 </li>
               );

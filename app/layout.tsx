@@ -3,10 +3,12 @@ import "./globals.css";
 import { ServiceWorkerRegistration } from "./sw-register";
 import { OfflineBanner } from "./offline-banner";
 import { DbProvider } from "@/lib/store";
+import { CareSpaceBar } from "./care-space-bar";
+import { CareSpaceBoundary } from "./care-space-boundary";
 
 export const metadata: Metadata = {
   title: "투약 관리",
-  description: "약 복용과 건강 상태를 빠르게 기록하는 개인용 투약 관리 앱",
+  description: "본인과 초대한 가족이 복약 기록과 알림을 안전하게 공유하는 앱",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -31,7 +33,8 @@ export default function RootLayout({
         <OfflineBanner />
         <DbProvider>
           <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-canvas px-5 pb-8 pt-6">
-            {children}
+            <CareSpaceBar />
+            <CareSpaceBoundary>{children}</CareSpaceBoundary>
           </div>
         </DbProvider>
         <ServiceWorkerRegistration />

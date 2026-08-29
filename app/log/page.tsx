@@ -40,6 +40,7 @@ function MedLogInner() {
     refresh,
     clearError,
     addLog,
+    canWriteRecords,
   } = useDb();
 
   const medication = useMemo(
@@ -115,6 +116,27 @@ function MedLogInner() {
           onRetry={refresh}
           onDismiss={clearError}
         />
+      </main>
+    );
+  }
+
+  if (!canWriteRecords) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader title={medication.name} />
+        <Notice
+          tone="warning"
+          action={
+            <Link
+              href="/records"
+              className="flex min-h-12 w-full items-center justify-center rounded-full border border-hairline bg-canvas px-5 text-base font-bold text-ink"
+            >
+              기록 확인하기
+            </Link>
+          }
+        >
+          이 가족 공간에서는 기록을 조회만 할 수 있습니다.
+        </Notice>
       </main>
     );
   }

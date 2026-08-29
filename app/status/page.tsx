@@ -56,6 +56,53 @@ const statusGroups = {
 type StatusKey = keyof typeof statusGroups;
 type Values = Record<StatusKey, string | null>;
 
+function readOnlyLabel(key: StatusKey, value: string | null): string | null {
+  if (value === null) return null;
+  return (
+    statusGroups[key].options.find((option) => option.value === value)?.label ??
+    value
+  );
+}
+
+function ReadOnlyStatus({ existing }: { existing?: DailyStatus }) {
+  if (!existing) {
+    return (
+      <Notice tone="warning">
+        이 날짜의 상태 기록이 없습니다. 조회 전용 구성원은 새 기록을 만들 수
+        없습니다.
+      </Notice>
+    );
+  }
+
+  const rows = [
+    ["피로", readOnlyLabel("fatigue", existing.fatigue)],
+    ["근력", readOnlyLabel("strength", existing.strength)],
+    ["호흡", readOnlyLabel("breathing", existing.breathing)],
+    ["눈 증상", readOnlyLabel("eye", existing.eye_symptom)],
+  ].filter((row): row is [string, string] => row[1] !== null);
+
+  return (
+    <section className="rounded-2xl border border-hairline bg-canvas px-5 py-5">
+      <h2 className="text-xl font-bold text-ink">기록된 상태</h2>
+      <p className="mt-2 text-base text-muted">조회 전용으로 보고 있습니다.</p>
+      <dl className="mt-4 grid gap-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex flex-wrap justify-between gap-2">
+            <dt className="font-bold text-ink">{label}</dt>
+            <dd className="text-body">{value}</dd>
+          </div>
+        ))}
+        {existing.note && (
+          <div className="border-t border-hairline-soft pt-3">
+            <dt className="font-bold text-ink">메모</dt>
+            <dd className="mt-1 leading-relaxed text-body">{existing.note}</dd>
+          </div>
+        )}
+      </dl>
+    </section>
+  );
+}
+
 function validDateKey(value: string | null) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return toDateKey(new Date());
@@ -303,7 +350,7 @@ function StatusPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const dateKey = validDateKey(params.get("date"));
-  const { db, loading, error, refresh, clearError } = useDb();
+  const { db, loading, error, refresh, clearError, canWriteRecords } = useDb();
   const [editingStarted, setEditingStarted] = useState(false);
   const existing = db.daily_status.find((status) => status.date === dateKey);
   const initialLoading =
@@ -361,6 +408,8 @@ function StatusPageInner() {
         <LoadingState label="상태 기록을 불러오는 중입니다." />
       ) : error && db.daily_status.length === 0 ? (
         <ErrorBanner message={error} onRetry={refresh} onDismiss={clearError} />
+      ) : !canWriteRecords ? (
+        <ReadOnlyStatus existing={existing} />
       ) : (
         <StatusEditor
           key={dateKey}

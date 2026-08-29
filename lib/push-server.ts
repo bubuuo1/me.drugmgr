@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient as createSupabaseClient,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import {
   sendNotification,
   WebPushError,
@@ -38,13 +41,25 @@ function pushDatabase(): SupabaseClient<Database> {
       "알림 서버 설정 오류: Supabase publishable key가 필요합니다."
     );
   }
-  return createClient<Database>(url, publicKey, {
+  return createSupabaseClient<Database>(url, publicKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
     },
   });
+}
+
+function validatedCareSpaceId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    )
+  ) {
+    throw new Error("알림을 받을 가족 공간을 확인하지 못했습니다.");
+  }
+  return value;
 }
 
 function vapidConfiguration(): VapidConfiguration {
@@ -123,10 +138,16 @@ async function deliverPush(
   return result.statusCode;
 }
 
-export async function registerPushSubscription(value: unknown): Promise<void> {
+export async function registerPushSubscription(
+  client: SupabaseClient<Database>,
+  careSpaceId: unknown,
+  value: unknown
+): Promise<void> {
+  const selectedCareSpaceId = validatedCareSpaceId(careSpaceId);
   const subscription = validatePushSubscription(value);
-  const { error } = await pushDatabase().rpc("register_push_subscription", {
+  const { error } = await client.rpc("register_push_subscription", {
     p_auth: subscription.keys.auth,
+    p_care_space_id: selectedCareSpaceId,
     p_dispatch_secret: dispatchSecret(),
     p_endpoint: subscription.endpoint,
     p_expiration_time: expirationTimeToIso(subscription.expirationTime),
@@ -135,22 +156,52 @@ export async function registerPushSubscription(value: unknown): Promise<void> {
   if (error) throw new Error(`알림 기기 등록 실패: ${error.message}`);
 }
 
-export async function unregisterPushSubscription(value: unknown): Promise<void> {
+export async function unregisterPushSubscription(
+  client: SupabaseClient<Database>,
+  careSpaceId: unknown,
+  value: unknown
+): Promise<void> {
+  const selectedCareSpaceId = validatedCareSpaceId(careSpaceId);
   const subscription = validatePushSubscription(value);
-  const { error } = await pushDatabase().rpc("unregister_push_subscription", {
+  const { error } = await client.rpc("unregister_push_subscription", {
     p_auth: subscription.keys.auth,
+    p_care_space_id: selectedCareSpaceId,
     p_dispatch_secret: dispatchSecret(),
     p_endpoint: subscription.endpoint,
   });
   if (error) throw new Error(`알림 기기 해제 실패: ${error.message}`);
 }
 
-export async function sendTestPush(value: unknown): Promise<void> {
+export async function hasRegisteredPushSubscription(
+  client: SupabaseClient<Database>,
+  careSpaceId: unknown,
+  value: unknown
+): Promise<boolean> {
+  const selectedCareSpaceId = validatedCareSpaceId(careSpaceId);
   const requested = validatePushSubscription(value);
-  const client = pushDatabase();
   const { data, error } = await client
     .rpc("get_push_subscription_for_test", {
       p_auth: requested.keys.auth,
+      p_care_space_id: selectedCareSpaceId,
+      p_dispatch_secret: dispatchSecret(),
+      p_endpoint: requested.endpoint,
+    })
+    .maybeSingle();
+  if (error) throw new Error(`알림 상태 확인 실패: ${error.message}`);
+  return data !== null;
+}
+
+export async function sendTestPush(
+  client: SupabaseClient<Database>,
+  careSpaceId: unknown,
+  value: unknown
+): Promise<void> {
+  const selectedCareSpaceId = validatedCareSpaceId(careSpaceId);
+  const requested = validatePushSubscription(value);
+  const { data, error } = await client
+    .rpc("get_push_subscription_for_test", {
+      p_auth: requested.keys.auth,
+      p_care_space_id: selectedCareSpaceId,
       p_dispatch_secret: dispatchSecret(),
       p_endpoint: requested.endpoint,
     })
@@ -174,7 +225,11 @@ export async function sendTestPush(value: unknown): Promise<void> {
   } catch (error) {
     const status = statusCodeOf(error);
     if (isExpiredSubscriptionStatus(status)) {
-      await unregisterPushSubscription(requested).catch(() => undefined);
+      await unregisterPushSubscription(
+        client,
+        selectedCareSpaceId,
+        requested
+      ).catch(() => undefined);
       throw new Error("알림 등록이 만료되었습니다. 알림을 다시 켜 주세요.");
     }
     throw new Error("테스트 알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");

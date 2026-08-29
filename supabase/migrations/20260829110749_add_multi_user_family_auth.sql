@@ -1,67 +1,11 @@
--- 투약 관리 앱: Google Auth 사용자별 격리와 가족 공유를 포함한 최종 스키마
--- 주의: 이 파일은 앱 테이블을 재생성한다. 운영 데이터 변경에는 migrations를 사용한다.
+-- Add authenticated multi-user care spaces, family sharing, and isolated push targets.
+-- Existing medicine records are intentionally left in an unclaimed legacy care space.
 
 begin;
 
-drop trigger if exists medicine_app_on_auth_user_created on auth.users;
-
-drop table if exists private.push_deliveries cascade;
-drop table if exists private.push_subscription_spaces cascade;
-drop table if exists private.push_subscriptions cascade;
-drop table if exists public.medication_logs cascade;
-drop table if exists public.daily_status cascade;
-drop table if exists public.medication_schedules cascade;
-drop table if exists public.medications cascade;
-drop table if exists public.care_space_invites cascade;
-drop table if exists public.care_space_members cascade;
-drop table if exists public.care_spaces cascade;
-drop table if exists public.profiles cascade;
-
-drop function if exists private.push_dispatch_secret_matches(text) cascade;
-drop function if exists private.push_delivery_is_sendable(uuid, timestamptz) cascade;
-drop function if exists private.is_care_space_member(uuid) cascade;
-drop function if exists private.is_care_space_owner(uuid) cascade;
-drop function if exists private.can_mutate_care_records(uuid) cascade;
-drop function if exists private.shares_care_space(uuid) cascade;
-drop function if exists private.is_verified_invite_recipient(text) cascade;
-drop function if exists private.set_audit_actor() cascade;
-drop function if exists private.add_care_space_creator_as_owner() cascade;
-drop function if exists private.handle_medicine_app_new_user() cascade;
-drop function if exists public.create_care_space_invite(uuid, text, text, timestamptz) cascade;
-drop function if exists public.get_pending_care_space_invites() cascade;
-drop function if exists public.accept_care_space_invite(uuid) cascade;
-drop function if exists public.decline_care_space_invite(uuid) cascade;
-drop function if exists public.revoke_care_space_invite(uuid) cascade;
-drop function if exists public.remove_care_space_member(uuid, uuid) cascade;
-drop function if exists public.register_push_subscription(text, text, text, timestamptz) cascade;
-drop function if exists public.register_push_subscription(text, text, text, text, timestamptz) cascade;
-drop function if exists public.register_push_subscription(
-  text, uuid, text, text, text, timestamptz
-) cascade;
-drop function if exists public.unregister_push_subscription(text) cascade;
-drop function if exists public.unregister_push_subscription(text, text, text) cascade;
-drop function if exists public.unregister_push_subscription(text, uuid, text, text) cascade;
-drop function if exists public.get_push_subscription_for_test(text, text) cascade;
-drop function if exists public.get_push_subscription_for_test(text, text, text) cascade;
-drop function if exists public.get_push_subscription_for_test(text, uuid, text, text) cascade;
-drop function if exists public.claim_due_push_notifications(text, timestamptz) cascade;
-drop function if exists public.prepare_push_delivery_for_send(
-  text, uuid, smallint, timestamptz
-) cascade;
-drop function if exists public.complete_push_delivery(
-  text, uuid, boolean, integer, text, boolean
-) cascade;
-drop function if exists public.complete_push_delivery(
-  text, uuid, smallint, boolean, integer, text, boolean
-) cascade;
-drop function if exists public.set_medication_log_snapshot() cascade;
-drop function if exists public.set_updated_at() cascade;
-
 create extension if not exists "pgcrypto";
-create extension if not exists pg_cron;
-create extension if not exists pg_net;
-
 create schema if not exists private;
+
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to authenticated;
 
@@ -161,293 +105,6 @@ create index care_space_invites_recipient_pending_idx
   on public.care_space_invites (email, created_at desc)
   where status = 'pending';
 
-create table public.medications (
-  id uuid primary key default gen_random_uuid(),
-  care_space_id uuid not null
-    references public.care_spaces(id) on delete cascade,
-  name text not null,
-  unit text not null default '정',
-  active boolean not null default true,
-  quantity_options jsonb not null default '[1,2,3,4]'::jsonb,
-  created_by uuid null references auth.users(id) on delete set null,
-  updated_by uuid null references auth.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint medications_id_care_space_unique unique (id, care_space_id),
-  constraint medications_name_valid check (
-    name = btrim(name) and char_length(name) between 1 and 100
-  ),
-  constraint medications_unit_valid check (
-    unit = btrim(unit) and char_length(unit) <= 20
-  ),
-  constraint medications_quantity_options_valid check (
-    jsonb_typeof(quantity_options) = 'array'
-    and jsonb_array_length(quantity_options) <= 50
-    and not jsonb_path_exists(
-      quantity_options,
-      '$[*] ? (@.type() != "number" || @ <= 0 || @ > 1000)'
-    )
-  )
-);
-
-create unique index medications_care_space_name_unique
-  on public.medications (care_space_id, lower(name));
-create index medications_active_idx
-  on public.medications (created_at) where active;
-create index medications_care_space_active_idx
-  on public.medications (care_space_id, created_at) where active;
-
-create table public.medication_schedules (
-  id uuid primary key default gen_random_uuid(),
-  care_space_id uuid not null
-    references public.care_spaces(id) on delete cascade,
-  medication_id uuid not null
-    constraint medication_schedules_medication_id_fkey
-    references public.medications(id) on update restrict on delete restrict,
-  time time(0) without time zone not null,
-  active boolean not null default true,
-  created_by uuid null references auth.users(id) on delete set null,
-  updated_by uuid null references auth.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint medication_schedules_id_care_space_unique
-    unique (id, care_space_id),
-  constraint medication_schedules_medication_care_space_fkey
-    foreign key (medication_id, care_space_id)
-    references public.medications(id, care_space_id)
-    on update restrict on delete restrict,
-  constraint medication_schedules_medication_time_unique
-    unique (care_space_id, medication_id, time)
-);
-
-create index medication_schedules_medication_id_idx
-  on public.medication_schedules (medication_id);
-create index medication_schedules_active_time_idx
-  on public.medication_schedules (time) where active;
-create index medication_schedules_care_space_active_time_idx
-  on public.medication_schedules (care_space_id, time) where active;
-
-create table public.medication_logs (
-  id uuid primary key default gen_random_uuid(),
-  care_space_id uuid not null
-    references public.care_spaces(id) on delete cascade,
-  client_request_id uuid not null,
-  medication_id uuid not null
-    constraint medication_logs_medication_id_fkey
-    references public.medications(id) on update restrict on delete restrict,
-  schedule_id uuid null
-    constraint medication_logs_schedule_id_fkey
-    references public.medication_schedules(id)
-    on update restrict on delete set null,
-  medication_name text not null,
-  medication_unit text not null,
-  schedule_time time(0) without time zone null,
-  taken_at timestamptz not null default now(),
-  quantity numeric(8,3) not null,
-  note text null,
-  is_extra boolean not null,
-  deleted_at timestamptz null,
-  created_by uuid null references auth.users(id) on delete set null,
-  updated_by uuid null references auth.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint medication_logs_care_space_client_request_id_unique
-    unique (care_space_id, client_request_id),
-  constraint medication_logs_medication_care_space_fkey
-    foreign key (medication_id, care_space_id)
-    references public.medications(id, care_space_id)
-    on update restrict on delete restrict,
-  constraint medication_logs_schedule_care_space_fkey
-    foreign key (schedule_id, care_space_id)
-    references public.medication_schedules(id, care_space_id)
-    on update restrict on delete set null (schedule_id),
-  constraint medication_logs_quantity_valid check (quantity > 0 and quantity <= 1000),
-  constraint medication_logs_name_snapshot_valid check (
-    char_length(medication_name) between 1 and 100
-  ),
-  constraint medication_logs_unit_snapshot_valid check (
-    char_length(medication_unit) <= 20
-  ),
-  constraint medication_logs_note_valid check (
-    note is null or char_length(note) <= 2000
-  ),
-  constraint medication_logs_extra_schedule_valid check (
-    not is_extra or schedule_id is null
-  )
-);
-
-create index medication_logs_active_taken_at_idx
-  on public.medication_logs (taken_at desc) where deleted_at is null;
-create index medication_logs_active_medication_taken_at_idx
-  on public.medication_logs (medication_id, taken_at desc)
-  where deleted_at is null;
-create index medication_logs_schedule_id_idx
-  on public.medication_logs (schedule_id)
-  where schedule_id is not null;
-create index medication_logs_deleted_at_idx
-  on public.medication_logs (deleted_at desc)
-  where deleted_at is not null;
-create index medication_logs_schedule_taken_at_idx
-  on public.medication_logs (schedule_id, taken_at)
-  where schedule_id is not null and deleted_at is null;
-create index medication_logs_care_space_taken_at_idx
-  on public.medication_logs (care_space_id, taken_at desc)
-  where deleted_at is null;
-create index medication_logs_care_space_schedule_taken_at_idx
-  on public.medication_logs (care_space_id, schedule_id, taken_at)
-  where schedule_id is not null and deleted_at is null;
-create index medication_logs_care_space_id_idx
-  on public.medication_logs (care_space_id);
-create index medication_logs_medication_care_space_idx
-  on public.medication_logs (medication_id, care_space_id);
-
-create table public.daily_status (
-  id uuid primary key default gen_random_uuid(),
-  care_space_id uuid not null
-    references public.care_spaces(id) on delete cascade,
-  date date not null,
-  fatigue text null,
-  strength text null,
-  breathing text null,
-  eye_symptom text null,
-  note text null,
-  created_by uuid null references auth.users(id) on delete set null,
-  updated_by uuid null references auth.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint daily_status_care_space_date_unique unique (care_space_id, date),
-  constraint daily_status_fatigue_valid check (
-    fatigue is null or fatigue in ('좋음', '보통', '나쁨')
-  ),
-  constraint daily_status_strength_valid check (
-    strength is null or strength in ('좋음', '보통', '나쁨')
-  ),
-  constraint daily_status_breathing_valid check (
-    breathing is null or breathing in ('편안함', '평소와 다름')
-  ),
-  constraint daily_status_eye_symptom_valid check (
-    eye_symptom is null or eye_symptom in ('없음', '있음')
-  ),
-  constraint daily_status_note_valid check (
-    note is null or char_length(note) <= 2000
-  )
-);
-
-create index daily_status_care_space_date_idx
-  on public.daily_status (care_space_id, date desc);
-
-create table private.push_subscriptions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid null references auth.users(id) on delete cascade,
-  endpoint text not null unique,
-  p256dh text not null,
-  auth text not null,
-  expiration_time timestamptz null,
-  disabled_at timestamptz null,
-  last_seen_at timestamptz not null default now(),
-  last_success_at timestamptz null,
-  last_failure_at timestamptz null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint push_subscriptions_id_user_unique unique (id, user_id),
-  constraint push_subscriptions_active_owner_valid check (
-    user_id is not null or disabled_at is not null
-  ),
-  constraint push_subscriptions_endpoint_valid check (
-    char_length(endpoint) between 1 and 2048
-    and octet_length(endpoint) <= 2048
-  ),
-  constraint push_subscriptions_p256dh_valid check (
-    char_length(p256dh) between 8 and 512
-  ),
-  constraint push_subscriptions_auth_valid check (
-    char_length(auth) between 8 and 512
-  )
-);
-
-create index push_subscriptions_active_idx
-  on private.push_subscriptions (last_seen_at desc)
-  where disabled_at is null;
-create index push_subscriptions_user_active_idx
-  on private.push_subscriptions (user_id, last_seen_at desc)
-  where disabled_at is null;
-create index push_subscriptions_user_id_idx
-  on private.push_subscriptions (user_id)
-  where user_id is not null;
-
-create table private.push_subscription_spaces (
-  subscription_id uuid not null,
-  user_id uuid not null,
-  care_space_id uuid not null,
-  created_at timestamptz not null default now(),
-  primary key (subscription_id, care_space_id),
-  constraint push_subscription_spaces_subscription_user_fkey
-    foreign key (subscription_id, user_id)
-    references private.push_subscriptions(id, user_id) on delete cascade,
-  constraint push_subscription_spaces_member_fkey
-    foreign key (care_space_id, user_id)
-    references public.care_space_members(care_space_id, user_id) on delete cascade
-);
-
-create index push_subscription_spaces_space_user_idx
-  on private.push_subscription_spaces (care_space_id, user_id, subscription_id);
-create index push_subscription_spaces_user_idx
-  on private.push_subscription_spaces (user_id, subscription_id);
-
-create table private.push_deliveries (
-  id uuid primary key default gen_random_uuid(),
-  subscription_id uuid not null
-    references private.push_subscriptions(id) on delete cascade,
-  care_space_id uuid not null,
-  schedule_id uuid not null,
-  scheduled_for timestamptz not null,
-  status text not null,
-  attempt_count smallint not null default 0,
-  response_status integer null,
-  error_code text null,
-  attempted_at timestamptz null,
-  accepted_at timestamptz null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint push_deliveries_schedule_care_space_fkey
-    foreign key (schedule_id, care_space_id)
-    references public.medication_schedules(id, care_space_id) on delete cascade,
-  constraint push_deliveries_status_valid check (
-    status in ('pending', 'accepted', 'failed', 'skipped')
-  ),
-  constraint push_deliveries_attempt_count_valid check (
-    attempt_count between 0 and 10
-  ),
-  constraint push_deliveries_response_status_valid check (
-    response_status is null or response_status between 100 and 599
-  ),
-  constraint push_deliveries_once_per_schedule unique (
-    subscription_id,
-    schedule_id,
-    scheduled_for
-  )
-);
-
-create index push_deliveries_pending_idx
-  on private.push_deliveries (scheduled_for)
-  where status in ('pending', 'failed');
-create index push_deliveries_schedule_id_idx
-  on private.push_deliveries (schedule_id);
-create index push_deliveries_space_schedule_idx
-  on private.push_deliveries (care_space_id, schedule_id);
-
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
 create or replace function private.is_care_space_member(p_care_space_id uuid)
 returns boolean
 language sql
@@ -511,6 +168,19 @@ as $$
         and theirs.user_id = p_other_user_id
   );
 $$;
+
+revoke all on function private.is_care_space_member(uuid)
+  from public, anon, authenticated;
+revoke all on function private.is_care_space_owner(uuid)
+  from public, anon, authenticated;
+revoke all on function private.can_mutate_care_records(uuid)
+  from public, anon, authenticated;
+revoke all on function private.shares_care_space(uuid)
+  from public, anon, authenticated;
+grant execute on function private.is_care_space_member(uuid) to authenticated;
+grant execute on function private.is_care_space_owner(uuid) to authenticated;
+grant execute on function private.can_mutate_care_records(uuid) to authenticated;
+grant execute on function private.shares_care_space(uuid) to authenticated;
 
 create or replace function private.set_audit_actor()
 returns trigger
@@ -611,82 +281,21 @@ begin
 end;
 $$;
 
-create or replace function public.set_medication_log_snapshot()
-returns trigger
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-declare
-  selected_medication_name text;
-  selected_medication_unit text;
-  selected_schedule_medication_id uuid;
-  selected_schedule_time time(0) without time zone;
-begin
-  if tg_op = 'UPDATE' and new.care_space_id is distinct from old.care_space_id then
-    raise check_violation using message = 'care_space_id cannot be changed';
-  end if;
+revoke all on function private.set_audit_actor()
+  from public, anon, authenticated;
+revoke all on function private.add_care_space_creator_as_owner()
+  from public, anon, authenticated;
+revoke all on function private.handle_medicine_app_new_user()
+  from public, anon, authenticated;
 
-  if tg_op = 'INSERT' or new.medication_id is distinct from old.medication_id then
-    select medication.name, medication.unit
-      into selected_medication_name, selected_medication_unit
-      from public.medications as medication
-      where medication.id = new.medication_id
-        and medication.care_space_id = new.care_space_id;
-    if not found then
-      raise foreign_key_violation
-        using message = 'medication_id does not belong to care_space_id';
-    end if;
-    new.medication_name := selected_medication_name;
-    new.medication_unit := selected_medication_unit;
-  else
-    new.medication_name := old.medication_name;
-    new.medication_unit := old.medication_unit;
-  end if;
+create trigger care_spaces_add_creator_as_owner
+  after insert on public.care_spaces
+  for each row execute function private.add_care_space_creator_as_owner();
 
-  if new.schedule_id is not null then
-    if new.is_extra then
-      raise check_violation using message = 'scheduled medication log cannot be extra';
-    end if;
-    select schedule.medication_id, schedule.time
-      into selected_schedule_medication_id, selected_schedule_time
-      from public.medication_schedules as schedule
-      where schedule.id = new.schedule_id
-        and schedule.care_space_id = new.care_space_id;
-    if not found then
-      raise foreign_key_violation
-        using message = 'schedule_id does not belong to care_space_id';
-    end if;
-    if selected_schedule_medication_id <> new.medication_id then
-      raise check_violation using message = 'schedule_id does not belong to medication_id';
-    end if;
-    if tg_op = 'INSERT' or new.schedule_id is distinct from old.schedule_id then
-      new.schedule_time := selected_schedule_time;
-    else
-      new.schedule_time := old.schedule_time;
-    end if;
-  elsif tg_op = 'INSERT' then
-    if not new.is_extra then
-      raise check_violation using message = 'log without schedule_id must be extra';
-    end if;
-    new.schedule_time := null;
-  elsif new.schedule_id is distinct from old.schedule_id then
-    if new.is_extra then
-      new.schedule_time := null;
-    else
-      new.schedule_time := old.schedule_time;
-    end if;
-  else
-    new.schedule_time := old.schedule_time;
-  end if;
-
-  if tg_op = 'UPDATE' then
-    new.client_request_id := old.client_request_id;
-    new.created_at := old.created_at;
-  end if;
-  return new;
-end;
-$$;
+drop trigger if exists medicine_app_on_auth_user_created on auth.users;
+create trigger medicine_app_on_auth_user_created
+  after insert on auth.users
+  for each row execute function private.handle_medicine_app_new_user();
 
 create trigger profiles_set_updated_at
   before update on public.profiles
@@ -694,73 +303,42 @@ create trigger profiles_set_updated_at
 create trigger care_spaces_set_updated_at
   before update on public.care_spaces
   for each row execute function public.set_updated_at();
-create trigger care_spaces_add_creator_as_owner
-  after insert on public.care_spaces
-  for each row execute function private.add_care_space_creator_as_owner();
 create trigger care_space_members_set_updated_at
   before update on public.care_space_members
   for each row execute function public.set_updated_at();
 create trigger care_space_invites_set_updated_at
   before update on public.care_space_invites
   for each row execute function public.set_updated_at();
-create trigger medications_set_audit_actor
-  before insert or update on public.medications
-  for each row execute function private.set_audit_actor();
-create trigger medications_set_updated_at
-  before update on public.medications
-  for each row execute function public.set_updated_at();
-create trigger medication_schedules_set_audit_actor
-  before insert or update on public.medication_schedules
-  for each row execute function private.set_audit_actor();
-create trigger medication_schedules_set_updated_at
-  before update on public.medication_schedules
-  for each row execute function public.set_updated_at();
-create trigger medication_logs_set_audit_actor
-  before insert or update on public.medication_logs
-  for each row execute function private.set_audit_actor();
-create trigger medication_logs_set_snapshot
-  before insert or update on public.medication_logs
-  for each row execute function public.set_medication_log_snapshot();
-create trigger medication_logs_set_updated_at
-  before update on public.medication_logs
-  for each row execute function public.set_updated_at();
-create trigger daily_status_set_audit_actor
-  before insert or update on public.daily_status
-  for each row execute function private.set_audit_actor();
-create trigger daily_status_set_updated_at
-  before update on public.daily_status
-  for each row execute function public.set_updated_at();
-create trigger push_subscriptions_set_updated_at
-  before update on private.push_subscriptions
-  for each row execute function public.set_updated_at();
-create trigger push_deliveries_set_updated_at
-  before update on private.push_deliveries
-  for each row execute function public.set_updated_at();
 
-create trigger medicine_app_on_auth_user_created
-  after insert on auth.users
-  for each row execute function private.handle_medicine_app_new_user();
+-- Preserve every pre-auth medicine row without assigning it to the first login.
+insert into public.care_spaces (
+  id,
+  name,
+  created_by
+) values (
+  '00000000-0000-4000-8000-000000000100',
+  '기존 데이터 (미지정)',
+  null
+);
 
--- Existing Auth users receive empty personal spaces. No prescription rows are seeded.
+-- Backfill users that existed before this migration. This creates empty personal
+-- spaces only; it never adds the legacy prescriptions to those spaces.
 insert into public.profiles (user_id, display_name, avatar_url)
 select
   auth_user.id,
-  coalesce(
-    nullif(
-      left(
-        btrim(
-          coalesce(
-            auth_user.raw_user_meta_data ->> 'full_name',
-            auth_user.raw_user_meta_data ->> 'name',
-            ''
-          )
-        ),
-        100
+  coalesce(nullif(
+    left(
+      btrim(
+        coalesce(
+          auth_user.raw_user_meta_data ->> 'full_name',
+          auth_user.raw_user_meta_data ->> 'name',
+          ''
+        )
       ),
-      ''
+      100
     ),
-    '사용자'
-  ),
+    ''
+  ), '사용자'),
   nullif(
     left(
       btrim(coalesce(auth_user.raw_user_meta_data ->> 'avatar_url', '')),
@@ -806,40 +384,218 @@ where not exists (
     where member.user_id = auth_user.id and member.role = 'owner'
 );
 
-revoke all on function public.set_updated_at()
-  from public, anon, authenticated;
-revoke all on function public.set_medication_log_snapshot()
-  from public, anon, authenticated;
-revoke all on function private.is_care_space_member(uuid)
-  from public, anon, authenticated;
-revoke all on function private.is_care_space_owner(uuid)
-  from public, anon, authenticated;
-revoke all on function private.can_mutate_care_records(uuid)
-  from public, anon, authenticated;
-revoke all on function private.shares_care_space(uuid)
-  from public, anon, authenticated;
-revoke all on function private.set_audit_actor()
-  from public, anon, authenticated;
-revoke all on function private.add_care_space_creator_as_owner()
-  from public, anon, authenticated;
-revoke all on function private.handle_medicine_app_new_user()
-  from public, anon, authenticated;
-grant execute on function private.is_care_space_member(uuid) to authenticated;
-grant execute on function private.is_care_space_owner(uuid) to authenticated;
-grant execute on function private.can_mutate_care_records(uuid) to authenticated;
-grant execute on function private.shares_care_space(uuid) to authenticated;
+alter table public.medications
+  add column care_space_id uuid null,
+  add column created_by uuid null references auth.users(id) on delete set null,
+  add column updated_by uuid null references auth.users(id) on delete set null;
+alter table public.medication_schedules
+  add column care_space_id uuid null,
+  add column created_by uuid null references auth.users(id) on delete set null,
+  add column updated_by uuid null references auth.users(id) on delete set null;
+alter table public.medication_logs
+  add column care_space_id uuid null,
+  add column created_by uuid null references auth.users(id) on delete set null,
+  add column updated_by uuid null references auth.users(id) on delete set null;
+alter table public.daily_status
+  add column care_space_id uuid null,
+  add column created_by uuid null references auth.users(id) on delete set null,
+  add column updated_by uuid null references auth.users(id) on delete set null;
+
+update public.medications
+  set care_space_id = '00000000-0000-4000-8000-000000000100';
+update public.medication_schedules
+  set care_space_id = '00000000-0000-4000-8000-000000000100';
+update public.medication_logs
+  set care_space_id = '00000000-0000-4000-8000-000000000100';
+update public.daily_status
+  set care_space_id = '00000000-0000-4000-8000-000000000100';
+
+alter table public.medications alter column care_space_id set not null;
+alter table public.medication_schedules alter column care_space_id set not null;
+alter table public.medication_logs alter column care_space_id set not null;
+alter table public.daily_status alter column care_space_id set not null;
+
+drop index if exists public.medications_name_unique;
+alter table public.medication_schedules
+  drop constraint if exists medication_schedules_medication_time_unique;
+alter table public.daily_status
+  drop constraint if exists daily_status_date_unique;
+alter table public.medication_logs
+  drop constraint if exists medication_logs_client_request_id_unique;
+
+alter table public.medications
+  add constraint medications_care_space_id_fkey
+    foreign key (care_space_id) references public.care_spaces(id) on delete cascade,
+  add constraint medications_id_care_space_unique unique (id, care_space_id);
+create unique index medications_care_space_name_unique
+  on public.medications (care_space_id, lower(name));
+
+alter table public.medication_schedules
+  add constraint medication_schedules_care_space_id_fkey
+    foreign key (care_space_id) references public.care_spaces(id) on delete cascade,
+  add constraint medication_schedules_id_care_space_unique
+    unique (id, care_space_id),
+  add constraint medication_schedules_medication_care_space_fkey
+    foreign key (medication_id, care_space_id)
+    references public.medications(id, care_space_id)
+    on update restrict on delete restrict,
+  add constraint medication_schedules_medication_time_unique
+    unique (care_space_id, medication_id, time);
+
+alter table public.medication_logs
+  add constraint medication_logs_care_space_id_fkey
+    foreign key (care_space_id) references public.care_spaces(id) on delete cascade,
+  add constraint medication_logs_medication_care_space_fkey
+    foreign key (medication_id, care_space_id)
+    references public.medications(id, care_space_id)
+    on update restrict on delete restrict,
+  add constraint medication_logs_schedule_care_space_fkey
+    foreign key (schedule_id, care_space_id)
+    references public.medication_schedules(id, care_space_id)
+    on update restrict on delete set null (schedule_id),
+  add constraint medication_logs_care_space_client_request_id_unique
+    unique (care_space_id, client_request_id);
+
+alter table public.daily_status
+  add constraint daily_status_care_space_id_fkey
+    foreign key (care_space_id) references public.care_spaces(id) on delete cascade,
+  add constraint daily_status_care_space_date_unique
+    unique (care_space_id, date);
+
+create index medications_care_space_active_idx
+  on public.medications (care_space_id, created_at)
+  where active;
+create index medication_schedules_care_space_active_time_idx
+  on public.medication_schedules (care_space_id, time)
+  where active;
+create index medication_logs_care_space_taken_at_idx
+  on public.medication_logs (care_space_id, taken_at desc)
+  where deleted_at is null;
+create index medication_logs_care_space_schedule_taken_at_idx
+  on public.medication_logs (care_space_id, schedule_id, taken_at)
+  where schedule_id is not null and deleted_at is null;
+create index medication_logs_care_space_id_idx
+  on public.medication_logs (care_space_id);
+create index medication_logs_medication_care_space_idx
+  on public.medication_logs (medication_id, care_space_id);
+create index daily_status_care_space_date_idx
+  on public.daily_status (care_space_id, date desc);
+
+create trigger medications_set_audit_actor
+  before insert or update on public.medications
+  for each row execute function private.set_audit_actor();
+create trigger medication_schedules_set_audit_actor
+  before insert or update on public.medication_schedules
+  for each row execute function private.set_audit_actor();
+create trigger medication_logs_set_audit_actor
+  before insert or update on public.medication_logs
+  for each row execute function private.set_audit_actor();
+create trigger daily_status_set_audit_actor
+  before insert or update on public.daily_status
+  for each row execute function private.set_audit_actor();
+
+create or replace function public.set_medication_log_snapshot()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  selected_medication_name text;
+  selected_medication_unit text;
+  selected_schedule_medication_id uuid;
+  selected_schedule_time time(0) without time zone;
+begin
+  if tg_op = 'UPDATE' and new.care_space_id is distinct from old.care_space_id then
+    raise check_violation using message = 'care_space_id cannot be changed';
+  end if;
+
+  if tg_op = 'INSERT' or new.medication_id is distinct from old.medication_id then
+    select medication.name, medication.unit
+      into selected_medication_name, selected_medication_unit
+      from public.medications as medication
+      where medication.id = new.medication_id
+        and medication.care_space_id = new.care_space_id;
+
+    if not found then
+      raise foreign_key_violation
+        using message = 'medication_id does not belong to care_space_id';
+    end if;
+
+    new.medication_name := selected_medication_name;
+    new.medication_unit := selected_medication_unit;
+  else
+    new.medication_name := old.medication_name;
+    new.medication_unit := old.medication_unit;
+  end if;
+
+  if new.schedule_id is not null then
+    if new.is_extra then
+      raise check_violation using message = 'scheduled medication log cannot be extra';
+    end if;
+
+    select schedule.medication_id, schedule.time
+      into selected_schedule_medication_id, selected_schedule_time
+      from public.medication_schedules as schedule
+      where schedule.id = new.schedule_id
+        and schedule.care_space_id = new.care_space_id;
+
+    if not found then
+      raise foreign_key_violation
+        using message = 'schedule_id does not belong to care_space_id';
+    end if;
+    if selected_schedule_medication_id <> new.medication_id then
+      raise check_violation using message = 'schedule_id does not belong to medication_id';
+    end if;
+
+    if tg_op = 'INSERT' or new.schedule_id is distinct from old.schedule_id then
+      new.schedule_time := selected_schedule_time;
+    else
+      new.schedule_time := old.schedule_time;
+    end if;
+  elsif tg_op = 'INSERT' then
+    if not new.is_extra then
+      raise check_violation using message = 'log without schedule_id must be extra';
+    end if;
+    new.schedule_time := null;
+  elsif new.schedule_id is distinct from old.schedule_id then
+    if new.is_extra then
+      new.schedule_time := null;
+    else
+      new.schedule_time := old.schedule_time;
+    end if;
+  else
+    new.schedule_time := old.schedule_time;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    new.client_request_id := old.client_request_id;
+    new.created_at := old.created_at;
+  end if;
+
+  return new;
+end;
+$$;
 
 alter table public.profiles enable row level security;
 alter table public.care_spaces enable row level security;
 alter table public.care_space_members enable row level security;
 alter table public.care_space_invites enable row level security;
-alter table public.medications enable row level security;
-alter table public.medication_schedules enable row level security;
-alter table public.medication_logs enable row level security;
-alter table public.daily_status enable row level security;
-alter table private.push_subscriptions enable row level security;
-alter table private.push_subscription_spaces enable row level security;
-alter table private.push_deliveries enable row level security;
+
+drop policy if exists medications_anon_select on public.medications;
+drop policy if exists medications_anon_insert on public.medications;
+drop policy if exists medications_anon_update on public.medications;
+drop policy if exists medication_schedules_anon_select on public.medication_schedules;
+drop policy if exists medication_schedules_anon_insert on public.medication_schedules;
+drop policy if exists medication_schedules_anon_update on public.medication_schedules;
+drop policy if exists medication_schedules_anon_delete on public.medication_schedules;
+drop policy if exists medication_logs_anon_select on public.medication_logs;
+drop policy if exists medication_logs_anon_insert on public.medication_logs;
+drop policy if exists medication_logs_anon_update on public.medication_logs;
+drop policy if exists daily_status_anon_select on public.daily_status;
+drop policy if exists daily_status_anon_insert on public.daily_status;
+drop policy if exists daily_status_anon_update on public.daily_status;
+drop policy if exists daily_status_anon_delete on public.daily_status;
 
 create policy profiles_authenticated_select
   on public.profiles for select to authenticated
@@ -927,17 +683,16 @@ revoke all on table public.medications from anon, authenticated;
 revoke all on table public.medication_schedules from anon, authenticated;
 revoke all on table public.medication_logs from anon, authenticated;
 revoke all on table public.daily_status from anon, authenticated;
-revoke all on table private.push_subscriptions from public, anon, authenticated;
-revoke all on table private.push_subscription_spaces from public, anon, authenticated;
-revoke all on table private.push_deliveries from public, anon, authenticated;
 
 grant usage on schema public to authenticated, anon;
 grant usage on schema public, private to service_role;
 grant select on table public.profiles to authenticated;
 grant update (display_name, avatar_url) on table public.profiles to authenticated;
+
 grant select on table public.care_spaces to authenticated;
 grant insert (name) on table public.care_spaces to authenticated;
 grant update (name) on table public.care_spaces to authenticated;
+
 grant select on table public.care_space_members to authenticated;
 grant select on table public.care_space_invites to authenticated;
 
@@ -998,9 +753,6 @@ grant all on table public.medications to service_role;
 grant all on table public.medication_schedules to service_role;
 grant all on table public.medication_logs to service_role;
 grant all on table public.daily_status to service_role;
-grant all on table private.push_subscriptions to service_role;
-grant all on table private.push_subscription_spaces to service_role;
-grant all on table private.push_deliveries to service_role;
 
 create or replace function public.create_care_space_invite(
   p_care_space_id uuid,
@@ -1067,6 +819,7 @@ begin
     invited_by = excluded.invited_by,
     expires_at = excluded.expires_at
   returning * into selected_invite;
+
   return selected_invite;
 end;
 $$;
@@ -1151,10 +904,12 @@ begin
   if caller_id is null then
     raise insufficient_privilege using message = 'authentication required';
   end if;
+
   select lower(auth_user.email), auth_user.email_confirmed_at
     into caller_email, caller_email_confirmed_at
     from auth.users as auth_user
     where auth_user.id = caller_id;
+
   if caller_email is null or caller_email_confirmed_at is null then
     raise insufficient_privilege using message = 'verified account email required';
   end if;
@@ -1163,12 +918,14 @@ begin
     from public.care_space_invites as invite
     where invite.id = p_invite_id
     for update;
+
   if not found then
     raise no_data_found using message = 'invite not found';
   end if;
   if selected_invite.email <> caller_email then
     raise insufficient_privilege using message = 'invite recipient mismatch';
   end if;
+
   if selected_invite.status = 'accepted'
     and selected_invite.accepted_by = caller_id
   then
@@ -1180,6 +937,7 @@ begin
       return selected_member;
     end if;
   end if;
+
   if selected_invite.status <> 'pending' then
     raise check_violation using message = 'invite is not pending';
   end if;
@@ -1229,6 +987,7 @@ begin
   if caller_id is null then
     raise insufficient_privilege using message = 'authentication required';
   end if;
+
   select lower(auth_user.email), auth_user.email_confirmed_at
     into caller_email, caller_email_confirmed_at
     from auth.users as auth_user
@@ -1236,6 +995,7 @@ begin
   if caller_email is null or caller_email_confirmed_at is null then
     raise insufficient_privilege using message = 'verified account email required';
   end if;
+
   select invite.* into selected_invite
     from public.care_space_invites as invite
     where invite.id = p_invite_id
@@ -1255,6 +1015,7 @@ begin
   if selected_invite.expires_at <= now() then
     raise check_violation using message = 'invite has expired';
   end if;
+
   update public.care_space_invites as invite
     set status = 'declined',
         accepted_by = null,
@@ -1278,6 +1039,7 @@ begin
   if caller_id is null then
     raise insufficient_privilege using message = 'authentication required';
   end if;
+
   select invite.* into selected_invite
     from public.care_space_invites as invite
     where invite.id = p_invite_id
@@ -1294,6 +1056,7 @@ begin
   if selected_invite.status <> 'pending' then
     raise check_violation using message = 'invite is not pending';
   end if;
+
   update public.care_space_invites as invite
     set status = 'revoked',
         accepted_by = null,
@@ -1323,6 +1086,7 @@ begin
   if not private.is_care_space_owner(p_care_space_id) then
     raise insufficient_privilege using message = 'care space owner required';
   end if;
+
   select member.* into selected_member
     from public.care_space_members as member
     where member.care_space_id = p_care_space_id
@@ -1334,6 +1098,7 @@ begin
   if selected_member.role = 'owner' then
     raise check_violation using message = 'owner membership cannot be removed';
   end if;
+
   delete from public.care_space_members as member
     where member.care_space_id = selected_member.care_space_id
       and member.user_id = selected_member.user_id;
@@ -1357,35 +1122,84 @@ grant execute on function public.create_care_space_invite(uuid, text, text, time
   to authenticated;
 grant execute on function public.get_pending_care_space_invites()
   to authenticated;
-grant execute on function public.accept_care_space_invite(uuid) to authenticated;
-grant execute on function public.decline_care_space_invite(uuid) to authenticated;
-grant execute on function public.revoke_care_space_invite(uuid) to authenticated;
+grant execute on function public.accept_care_space_invite(uuid)
+  to authenticated;
+grant execute on function public.decline_care_space_invite(uuid)
+  to authenticated;
+grant execute on function public.revoke_care_space_invite(uuid)
+  to authenticated;
 grant execute on function public.remove_care_space_member(uuid, uuid)
   to authenticated;
 
-create or replace function private.push_dispatch_secret_matches(p_secret text)
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select p_secret is not null
-    and (
-      select count(*) from vault.decrypted_secrets
-        where name = 'push_dispatch_secret'
-    ) = 1
-    and exists (
-      select 1
-        from vault.decrypted_secrets as secret
-        where secret.name = 'push_dispatch_secret'
-          and extensions.digest(secret.decrypted_secret, 'sha256') =
-            extensions.digest(p_secret, 'sha256')
-    );
-$$;
+-- Existing anonymous subscriptions cannot be assigned to a user safely. Keep
+-- them for audit/retry history, but disable them until the same endpoint/auth
+-- key is explicitly reclaimed by an authenticated user.
+alter table private.push_subscriptions
+  add column user_id uuid null references auth.users(id) on delete cascade;
 
-revoke all on function private.push_dispatch_secret_matches(text)
+update private.push_subscriptions
+  set disabled_at = coalesce(disabled_at, now())
+  where user_id is null;
+
+alter table private.push_subscriptions
+  add constraint push_subscriptions_active_owner_valid check (
+    user_id is not null or disabled_at is not null
+  ),
+  add constraint push_subscriptions_id_user_unique unique (id, user_id);
+
+create index push_subscriptions_user_active_idx
+  on private.push_subscriptions (user_id, last_seen_at desc)
+  where disabled_at is null;
+create index push_subscriptions_user_id_idx
+  on private.push_subscriptions (user_id)
+  where user_id is not null;
+
+create table private.push_subscription_spaces (
+  subscription_id uuid not null,
+  user_id uuid not null,
+  care_space_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (subscription_id, care_space_id),
+  constraint push_subscription_spaces_subscription_user_fkey
+    foreign key (subscription_id, user_id)
+    references private.push_subscriptions(id, user_id) on delete cascade,
+  constraint push_subscription_spaces_member_fkey
+    foreign key (care_space_id, user_id)
+    references public.care_space_members(care_space_id, user_id) on delete cascade
+);
+
+create index push_subscription_spaces_space_user_idx
+  on private.push_subscription_spaces (care_space_id, user_id, subscription_id);
+create index push_subscription_spaces_user_idx
+  on private.push_subscription_spaces (user_id, subscription_id);
+
+alter table private.push_subscription_spaces enable row level security;
+revoke all on table private.push_subscription_spaces
   from public, anon, authenticated;
+grant all on table private.push_subscriptions to service_role;
+grant all on table private.push_subscription_spaces to service_role;
+grant all on table private.push_deliveries to service_role;
+
+alter table private.push_deliveries add column care_space_id uuid null;
+update private.push_deliveries as delivery
+  set care_space_id = schedule.care_space_id
+  from public.medication_schedules as schedule
+  where schedule.id = delivery.schedule_id;
+alter table private.push_deliveries alter column care_space_id set not null;
+alter table private.push_deliveries
+  drop constraint if exists push_deliveries_schedule_id_fkey,
+  add constraint push_deliveries_schedule_care_space_fkey
+    foreign key (schedule_id, care_space_id)
+    references public.medication_schedules(id, care_space_id) on delete cascade;
+
+create index push_deliveries_space_schedule_idx
+  on private.push_deliveries (care_space_id, schedule_id);
+
+drop function if exists public.register_push_subscription(
+  text, text, text, text, timestamptz
+);
+drop function if exists public.unregister_push_subscription(text, text, text);
+drop function if exists public.get_push_subscription_for_test(text, text, text);
 
 create or replace function public.register_push_subscription(
   p_dispatch_secret text,
@@ -1413,6 +1227,7 @@ begin
   if not private.is_care_space_member(p_care_space_id) then
     raise insufficient_privilege using message = 'active care space membership required';
   end if;
+
   if p_endpoint is null
     or char_length(p_endpoint) not between 1 and 2048
     or octet_length(p_endpoint) > 2048
@@ -1480,6 +1295,7 @@ begin
         )
       )
   returning id into selected_subscription_id;
+
   if selected_subscription_id is null then
     raise insufficient_privilege using message = 'push subscription owner mismatch';
   end if;
@@ -1494,6 +1310,7 @@ begin
     p_care_space_id
   )
   on conflict (subscription_id, care_space_id) do nothing;
+
   return true;
 end;
 $$;
@@ -1523,20 +1340,24 @@ begin
   if not private.is_care_space_member(p_care_space_id) then
     raise insufficient_privilege using message = 'active care space membership required';
   end if;
+
   select subscription.id into selected_subscription_id
     from private.push_subscriptions as subscription
     where subscription.user_id = caller_id
       and subscription.endpoint = p_endpoint
       and subscription.auth = p_auth
     for update;
+
   if not found then
     return false;
   end if;
+
   delete from private.push_subscription_spaces as target
     where target.subscription_id = selected_subscription_id
       and target.user_id = caller_id
       and target.care_space_id = p_care_space_id;
   removed_target := found;
+
   if not exists (
     select 1
       from private.push_subscription_spaces as target
@@ -1546,6 +1367,7 @@ begin
       set disabled_at = coalesce(subscription.disabled_at, now())
       where subscription.id = selected_subscription_id;
   end if;
+
   return removed_target;
 end;
 $$;
@@ -1579,6 +1401,7 @@ begin
   if not private.is_care_space_member(p_care_space_id) then
     raise insufficient_privilege using message = 'active care space membership required';
   end if;
+
   return query
   select
     target.care_space_id,
@@ -1751,8 +1574,9 @@ begin
       date_trunc('minute', p_now) - interval '3 minutes' as lower_bound,
       date_trunc('minute', p_now) as upper_bound,
       (p_now at time zone 'Asia/Seoul')::date as schedule_date,
-      (((p_now at time zone 'Asia/Seoul')::date + 1)::timestamp)
-        at time zone 'Asia/Seoul' as day_ends_at
+      (
+        ((p_now at time zone 'Asia/Seoul')::date + 1)::timestamp
+      ) at time zone 'Asia/Seoul' as day_ends_at
   ),
   daily_schedules as (
     select
@@ -1766,8 +1590,9 @@ begin
       bounds.lower_bound,
       bounds.upper_bound,
       bounds.day_ends_at,
-      (bounds.schedule_date + schedule.time)
-        at time zone 'Asia/Seoul' as first_scheduled_for
+      (
+        bounds.schedule_date + schedule.time
+      ) at time zone 'Asia/Seoul' as first_scheduled_for
       from private.push_subscriptions as subscription
       join private.push_subscription_spaces as target
         on target.subscription_id = subscription.id
@@ -1792,7 +1617,16 @@ begin
   ),
   candidate_times as (
     select
-      base.*,
+      base.subscription_id,
+      base.care_space_id,
+      base.schedule_id,
+      base.medication_id,
+      base.medication_name,
+      base.schedule_time,
+      base.schedule_date,
+      base.lower_bound,
+      base.upper_bound,
+      base.day_ends_at,
       base.first_scheduled_for +
         floor(
           extract(epoch from (base.upper_bound - base.first_scheduled_for)) / 300
@@ -1860,7 +1694,8 @@ begin
         and medication.care_space_id = schedule.care_space_id
       cross join bounds
       where delivery.status in ('pending', 'failed')
-        and delivery.scheduled_for > bounds.lower_bound - interval '2 minutes'
+        and delivery.scheduled_for >
+          bounds.lower_bound - interval '2 minutes'
         and delivery.scheduled_for <= bounds.upper_bound
         and (delivery.scheduled_for at time zone 'Asia/Seoul')::date =
           bounds.schedule_date
@@ -1905,7 +1740,8 @@ begin
       inserted.schedule_id,
       inserted.scheduled_for,
       inserted.attempt_count
-      from inserted where inserted.status = 'pending'
+      from inserted
+      where inserted.status = 'pending'
     union all
     select
       reclaimed.id,
@@ -1995,7 +1831,13 @@ begin
       for update
   ),
   valid_delivery as (
-    select locked.*
+    select
+      locked.id,
+      locked.subscription_id,
+      locked.care_space_id,
+      locked.schedule_id,
+      locked.scheduled_for,
+      locked.attempt_count
       from locked_delivery as locked
       where private.push_delivery_is_sendable(locked.id, p_now)
   ),
@@ -2038,6 +1880,7 @@ begin
 end;
 $$;
 
+-- The completion API keeps the original attempt token/idempotency behavior.
 create or replace function public.complete_push_delivery(
   p_dispatch_secret text,
   p_delivery_id uuid,
@@ -2061,6 +1904,7 @@ begin
   if not private.push_dispatch_secret_matches(p_dispatch_secret) then
     raise insufficient_privilege using message = 'invalid push dispatch secret';
   end if;
+
   update private.push_deliveries
     set status = case when p_success then 'accepted' else 'failed' end,
         response_status = p_response_status,
@@ -2070,9 +1914,11 @@ begin
       and status = 'pending'
       and attempt_count = p_attempt_count
     returning subscription_id into selected_subscription_id;
+
   if not found then
     return false;
   end if;
+
   update private.push_subscriptions
     set disabled_at = case
           when p_disable_subscription then coalesce(disabled_at, now())
@@ -2093,6 +1939,9 @@ revoke all on function public.prepare_push_delivery_for_send(
 revoke all on function public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) from public, anon, authenticated;
+
+-- Dispatch workers still authenticate with the Vault-backed secret. The user
+-- registration/test APIs above are deliberately not granted to anon.
 grant execute on function public.claim_due_push_notifications(text, timestamptz)
   to anon;
 grant execute on function public.prepare_push_delivery_for_send(
@@ -2101,45 +1950,5 @@ grant execute on function public.prepare_push_delivery_for_send(
 grant execute on function public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) to anon;
-
-do $$
-declare
-  dispatch_url_count integer;
-  dispatch_secret_count integer;
-begin
-  select count(*) into dispatch_url_count
-    from vault.decrypted_secrets where name = 'push_dispatch_url';
-  select count(*) into dispatch_secret_count
-    from vault.decrypted_secrets where name = 'push_dispatch_secret';
-  if dispatch_url_count <> 1 or dispatch_secret_count <> 1 then
-    raise exception
-      'exactly one push_dispatch_url and push_dispatch_secret Vault entry are required';
-  end if;
-  if exists (select 1 from cron.job where jobname = 'medicine-push-dispatch') then
-    perform cron.unschedule('medicine-push-dispatch');
-  end if;
-  perform cron.schedule(
-    'medicine-push-dispatch',
-    '* * * * *',
-    $job$
-      select net.http_post(
-        url := (
-          select decrypted_secret from vault.decrypted_secrets
-            where name = 'push_dispatch_url'
-        ),
-        headers := jsonb_build_object(
-          'Content-Type', 'application/json',
-          'Authorization', 'Bearer ' || (
-            select decrypted_secret from vault.decrypted_secrets
-              where name = 'push_dispatch_secret'
-          )
-        ),
-        body := jsonb_build_object('triggered_at', now()),
-        timeout_milliseconds := 15000
-      ) as request_id;
-    $job$
-  );
-end;
-$$;
 
 commit;

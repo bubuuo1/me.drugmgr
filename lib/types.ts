@@ -1,4 +1,71 @@
-export type Medication = {
+export type Profile = {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CareSpaceRole = "owner" | "caregiver" | "viewer";
+export type CareSpaceInviteRole = Exclude<CareSpaceRole, "owner">;
+export type CareSpaceInviteStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "revoked"
+  | "expired";
+
+export type CareSpace = {
+  id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CareSpaceAccess = CareSpace & {
+  role: CareSpaceRole;
+};
+
+export type CareSpaceMember = {
+  care_space_id: string;
+  user_id: string;
+  role: CareSpaceRole;
+  invited_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CareSpaceMemberWithProfile = CareSpaceMember & {
+  profile: Profile | null;
+};
+
+export type CareSpaceInvite = {
+  id: string;
+  care_space_id: string;
+  email: string;
+  role: CareSpaceInviteRole;
+  status: CareSpaceInviteStatus;
+  invited_by: string;
+  accepted_by: string | null;
+  expires_at: string;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PendingCareSpaceInvite = CareSpaceInvite & {
+  care_space_name: string;
+  inviter_display_name: string | null;
+};
+
+type CareSpaceScopedAudit = {
+  care_space_id: string;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+export type Medication = CareSpaceScopedAudit & {
   id: string;
   name: string;
   unit: string;
@@ -8,7 +75,7 @@ export type Medication = {
   updated_at: string;
 };
 
-export type MedicationSchedule = {
+export type MedicationSchedule = CareSpaceScopedAudit & {
   id: string;
   medication_id: string;
   time: string;
@@ -17,7 +84,7 @@ export type MedicationSchedule = {
   updated_at: string;
 };
 
-export type MedicationLog = {
+export type MedicationLog = CareSpaceScopedAudit & {
   id: string;
   client_request_id: string;
   medication_id: string;
@@ -34,7 +101,7 @@ export type MedicationLog = {
   updated_at: string;
 };
 
-export type DailyStatus = {
+export type DailyStatus = CareSpaceScopedAudit & {
   id: string;
   date: string;
   fatigue: string | null;
@@ -58,6 +125,12 @@ export type AddMedicationInput = {
   unit: string;
   quantity_options: number[];
   active?: boolean;
+};
+
+export type CreateCareSpaceInviteInput = {
+  email: string;
+  role: CareSpaceInviteRole;
+  expires_at?: string;
 };
 
 export type UpdateMedicationInput = Partial<
@@ -117,34 +190,98 @@ export function isBooleanOnly(medication: Medication): boolean {
   return medication.quantity_options.length === 0;
 }
 
-type MedicationInsert = Omit<Medication, "id" | "created_at" | "updated_at"> & {
+type ProfileInsert = Pick<Profile, "user_id" | "display_name"> & {
+  avatar_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type ProfileUpdate = Partial<
+  Omit<Profile, "user_id" | "created_at" | "updated_at">
+>;
+
+type CareSpaceInsert = Pick<CareSpace, "name"> & {
+  id?: string;
+  created_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type CareSpaceUpdate = Partial<Pick<CareSpace, "name">>;
+
+type CareSpaceMemberInsert = Omit<
+  CareSpaceMember,
+  "created_at" | "updated_at" | "invited_by"
+> & {
+  invited_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type CareSpaceMemberUpdate = Partial<Pick<CareSpaceMember, "role">>;
+
+type CareSpaceInviteInsert = Pick<
+  CareSpaceInvite,
+  "care_space_id" | "email" | "role" | "invited_by"
+> & {
+  id?: string;
+  accepted_by?: string | null;
+  expires_at?: string;
+  status?: CareSpaceInviteStatus;
+  responded_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type CareSpaceInviteUpdate = Partial<
+  Pick<
+    CareSpaceInvite,
+    "status" | "accepted_by" | "expires_at" | "responded_at"
+  >
+>;
+
+type MedicationInsert = Omit<
+  Medication,
+  "id" | "created_at" | "updated_at" | "created_by" | "updated_by"
+> & {
   id?: string;
   active?: boolean;
+  created_by?: string | null;
+  updated_by?: string | null;
   created_at?: string;
   updated_at?: string;
 };
 
 type MedicationUpdate = Partial<
-  Omit<Medication, "id" | "created_at" | "updated_at">
+  Omit<Medication, "id" | "care_space_id" | "created_at" | "updated_at">
 >;
 
 type MedicationScheduleInsert = Omit<
   MedicationSchedule,
-  "id" | "created_at" | "updated_at"
+  "id" | "created_at" | "updated_at" | "created_by" | "updated_by"
 > & {
   id?: string;
   active?: boolean;
+  created_by?: string | null;
+  updated_by?: string | null;
   created_at?: string;
   updated_at?: string;
 };
 
 type MedicationScheduleUpdate = Partial<
-  Omit<MedicationSchedule, "id" | "created_at" | "updated_at">
+  Omit<
+    MedicationSchedule,
+    "id" | "care_space_id" | "medication_id" | "created_at" | "updated_at"
+  >
 >;
 
 type MedicationLogInsert = Pick<
   MedicationLog,
-  "client_request_id" | "medication_id" | "quantity" | "is_extra"
+  | "care_space_id"
+  | "client_request_id"
+  | "medication_id"
+  | "quantity"
+  | "is_extra"
 > &
   Partial<
     Pick<
@@ -157,6 +294,8 @@ type MedicationLogInsert = Pick<
       | "taken_at"
       | "note"
       | "deleted_at"
+      | "created_by"
+      | "updated_by"
       | "created_at"
       | "updated_at"
     >
@@ -172,31 +311,97 @@ type MedicationLogUpdate = Partial<
     | "note"
     | "is_extra"
     | "deleted_at"
+    | "updated_by"
   >
 >;
 
-type DailyStatusInsert = Pick<DailyStatus, "date"> &
-  Partial<Omit<DailyStatus, "date">>;
+type DailyStatusInsert = Pick<DailyStatus, "care_space_id" | "date"> &
+  Partial<Omit<DailyStatus, "care_space_id" | "date">>;
 
 type DailyStatusUpdate = Partial<
-  Omit<DailyStatus, "id" | "created_at" | "updated_at">
+  Omit<
+    DailyStatus,
+    "id" | "care_space_id" | "created_by" | "created_at" | "updated_at"
+  >
 >;
 
 /** Minimal generated-style type used by supabase-js for end-to-end query typing. */
 export type Database = {
   public: {
     Tables: {
+      profiles: {
+        Row: Profile;
+        Insert: ProfileInsert;
+        Update: ProfileUpdate;
+        Relationships: [];
+      };
+      care_spaces: {
+        Row: CareSpace;
+        Insert: CareSpaceInsert;
+        Update: CareSpaceUpdate;
+        Relationships: [];
+      };
+      care_space_members: {
+        Row: CareSpaceMember;
+        Insert: CareSpaceMemberInsert;
+        Update: CareSpaceMemberUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "care_space_members_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "care_space_members_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["user_id"];
+          },
+        ];
+      };
+      care_space_invites: {
+        Row: CareSpaceInvite;
+        Insert: CareSpaceInviteInsert;
+        Update: CareSpaceInviteUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "care_space_invites_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       medications: {
         Row: Medication;
         Insert: MedicationInsert;
         Update: MedicationUpdate;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "medications_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       medication_schedules: {
         Row: MedicationSchedule;
         Insert: MedicationScheduleInsert;
         Update: MedicationScheduleUpdate;
         Relationships: [
+          {
+            foreignKeyName: "medication_schedules_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "medication_schedules_medication_id_fkey";
             columns: ["medication_id"];
@@ -211,6 +416,13 @@ export type Database = {
         Insert: MedicationLogInsert;
         Update: MedicationLogUpdate;
         Relationships: [
+          {
+            foreignKeyName: "medication_logs_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "medication_logs_medication_id_fkey";
             columns: ["medication_id"];
@@ -231,14 +443,52 @@ export type Database = {
         Row: DailyStatus;
         Insert: DailyStatusInsert;
         Update: DailyStatusUpdate;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "daily_status_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: Record<string, never>;
     Functions: {
+      create_care_space_invite: {
+        Args: {
+          p_care_space_id: string;
+          p_email: string;
+          p_expires_at?: string;
+          p_role: CareSpaceInviteRole;
+        };
+        Returns: CareSpaceInvite;
+      };
+      accept_care_space_invite: {
+        Args: { p_invite_id: string };
+        Returns: CareSpaceMember;
+      };
+      decline_care_space_invite: {
+        Args: { p_invite_id: string };
+        Returns: CareSpaceInvite;
+      };
+      revoke_care_space_invite: {
+        Args: { p_invite_id: string };
+        Returns: CareSpaceInvite;
+      };
+      remove_care_space_member: {
+        Args: { p_care_space_id: string; p_user_id: string };
+        Returns: CareSpaceMember;
+      };
+      get_pending_care_space_invites: {
+        Args: Record<string, never>;
+        Returns: PendingCareSpaceInvite[];
+      };
       register_push_subscription: {
         Args: {
           p_auth: string;
+          p_care_space_id: string;
           p_dispatch_secret: string;
           p_endpoint: string;
           p_expiration_time?: string | null;
@@ -247,16 +497,27 @@ export type Database = {
         Returns: boolean;
       };
       unregister_push_subscription: {
-        Args: { p_auth: string; p_dispatch_secret: string; p_endpoint: string };
+        Args: {
+          p_auth: string;
+          p_care_space_id: string;
+          p_dispatch_secret: string;
+          p_endpoint: string;
+        };
         Returns: boolean;
       };
       get_push_subscription_for_test: {
         Args: {
           p_auth: string;
+          p_care_space_id: string;
           p_dispatch_secret: string;
           p_endpoint: string;
         };
-        Returns: Array<{ auth: string; endpoint: string; p256dh: string }>;
+        Returns: Array<{
+          auth: string;
+          care_space_id: string;
+          endpoint: string;
+          p256dh: string;
+        }>;
       };
       claim_due_push_notifications: {
         Args: { p_dispatch_secret: string; p_now: string };

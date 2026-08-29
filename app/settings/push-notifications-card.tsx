@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  getPushNotificationStatus,
   sendTestNotification,
   subscribeToPush,
   unsubscribeFromPush,
@@ -9,11 +10,13 @@ import {
 import {
   isIosDevice,
   isStandaloneApp,
+  dismissScheduleNotifications,
   registerPushServiceWorker,
   serializePushSubscription,
   subscribeBrowserToPush,
   supportsWebPush,
 } from "@/lib/push-client";
+import { useDb } from "@/lib/store";
 
 type PushState =
   | "checking"
@@ -21,6 +24,7 @@ type PushState =
   | "unsupported"
   | "not-configured"
   | "denied"
+  | "offline"
   | "off"
   | "on"
   | "error";
@@ -41,16 +45,19 @@ function statusText(state: PushState): string {
       return "알림 서버 설정을 확인하고 있습니다.";
     case "denied":
       return "휴대폰 설정에서 이 앱의 알림을 허용해 주세요.";
+    case "offline":
+      return "인터넷 연결 후 이 가족 공간의 알림 상태를 확인할 수 있습니다.";
     case "on":
-      return "이 기기의 일정 알림이 켜져 있습니다.";
+      return "선택한 가족 공간의 일정 알림이 켜져 있습니다.";
     case "error":
       return "알림 상태를 확인하지 못했습니다.";
     default:
-      return "이 기기의 일정 알림이 꺼져 있습니다.";
+      return "선택한 가족 공간의 일정 알림이 꺼져 있습니다.";
   }
 }
 
 export function PushNotificationsCard({ online }: { online: boolean }) {
+  const { db, selectedCareSpace } = useDb();
   const [state, setState] = useState<PushState>("checking");
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
@@ -68,6 +75,10 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
   useEffect(() => {
     let cancelled = false;
     async function checkPushState() {
+      if (!selectedCareSpace) {
+        if (!cancelled) setState("off");
+        return;
+      }
       if (isIosDevice() && !isStandaloneApp()) {
         if (!cancelled) setState("needs-install");
         return;
@@ -90,13 +101,24 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
         const current = await registration.pushManager.getSubscription();
         if (cancelled) return;
         setSubscription(current);
-        setState(current ? "on" : "off");
-        if (current && online) {
-          const result = await subscribeToPush(serializePushSubscription(current));
-          if (!result.ok && !cancelled) {
-            setState("error");
-            showMessage(result.message, "error");
-          }
+        if (!current) {
+          setState("off");
+          return;
+        }
+        if (!online) {
+          setState("offline");
+          return;
+        }
+        const result = await getPushNotificationStatus(
+          selectedCareSpace.id,
+          serializePushSubscription(current)
+        );
+        if (cancelled) return;
+        if (result.ok) {
+          setState(result.registered ? "on" : "off");
+        } else {
+          setState("error");
+          showMessage(result.message, "error");
         }
       } catch {
         if (!cancelled) setState("error");
@@ -106,10 +128,10 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [online, showMessage]);
+  }, [online, selectedCareSpace, showMessage]);
 
   async function enableNotifications() {
-    if (!online || pending || !publicVapidKey) return;
+    if (!online || pending || !publicVapidKey || !selectedCareSpace) return;
     setPending("enable");
     setMessage(null);
     try {
@@ -125,6 +147,7 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
         publicVapidKey
       );
       const result = await subscribeToPush(
+        selectedCareSpace.id,
         serializePushSubscription(nextSubscription)
       );
       if (!result.ok) throw new Error(result.message);
@@ -145,16 +168,18 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
   }
 
   async function disableNotifications() {
-    if (!online || pending || !subscription) return;
+    if (!online || pending || !subscription || !selectedCareSpace) return;
     setPending("disable");
     setMessage(null);
     try {
       const result = await unsubscribeFromPush(
+        selectedCareSpace.id,
         serializePushSubscription(subscription)
       );
       if (!result.ok) throw new Error(result.message);
-      await subscription.unsubscribe();
-      setSubscription(null);
+      await dismissScheduleNotifications(
+        db.medication_schedules.map((schedule) => schedule.id)
+      );
       setState("off");
       showMessage(result.message, "success");
     } catch (error) {
@@ -170,11 +195,12 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
   }
 
   async function testNotifications() {
-    if (!online || pending || !subscription) return;
+    if (!online || pending || !subscription || !selectedCareSpace) return;
     setPending("test");
     setMessage(null);
     try {
       const result = await sendTestNotification(
+        selectedCareSpace.id,
         serializePushSubscription(subscription)
       );
       if (!result.ok) throw new Error(result.message);
@@ -191,7 +217,7 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
     }
   }
 
-  const canEnable = state === "off" || state === "error";
+  const canEnable = state === "off" || state === "error" || state === "offline";
 
   return (
     <section
@@ -203,8 +229,9 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
           투약 일정 알림
         </h2>
         <p className="text-base leading-relaxed text-body">
-          등록한 각 복용·알림 시간부터 5분마다 알림을 반복하고, 해당 시간의
-          투약 기록이 생기거나 시간을 끄거나 삭제하면 반복을 중단합니다.
+          <strong className="text-ink">{selectedCareSpace?.name ?? "선택한 사람"}</strong>의
+          각 복용·알림 시간부터 5분마다 알림을 반복하고, 해당 시간의 투약
+          기록이 생기거나 시간을 끄거나 삭제하면 반복을 중단합니다.
         </p>
         <p className="text-base font-semibold text-ink" role="status">
           {statusText(state)}
@@ -249,7 +276,7 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
           {pending === "enable"
             ? "알림을 켜는 중입니다"
             : online
-              ? "이 기기에서 알림 받기"
+              ? `${selectedCareSpace?.name ?? "이 공간"} 알림 받기`
               : "연결 후 알림 설정 가능"}
         </button>
       )}

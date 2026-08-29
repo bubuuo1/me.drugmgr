@@ -100,6 +100,115 @@ test("홈에서 빠른 기록, 상태, 복용기록 확인, 설정 진입점이 
   ).toBeVisible();
 });
 
+test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 있다", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const spaceNavigation = page.getByRole("navigation", {
+    name: "가족 공간과 계정",
+  });
+  await expect(spaceNavigation).toContainText("누구의 기록인가요?");
+  await expect(spaceNavigation.getByRole("combobox")).toHaveValue(
+    "mock-care-space"
+  );
+  await spaceNavigation
+    .getByRole("link", { name: "가족 관리", exact: true })
+    .click();
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: "가족 공유" })
+  ).toBeVisible();
+  await expect(page.getByText("테스트 사용자", { exact: true })).toBeVisible();
+
+  const caregiverRow = page
+    .getByRole("listitem")
+    .filter({ hasText: "테스트 보호자" });
+  await caregiverRow
+    .getByRole("button", { name: "접근 제거", exact: true })
+    .click();
+  const removalDialog = page.getByRole("dialog", {
+    name: "가족 접근을 제거할까요?",
+  });
+  await removalDialog
+    .getByRole("button", { name: "접근 권한 제거", exact: true })
+    .click();
+  await expect(caregiverRow).toHaveCount(0);
+
+  const inviteEmail = `family-${runSuffix}@example.com`;
+  await page
+    .getByLabel("Google 계정 이메일", { exact: true })
+    .fill(inviteEmail);
+  await page.getByLabel("권한", { exact: true }).selectOption("viewer");
+  await page.getByRole("button", { name: "초대 만들기", exact: true }).click();
+
+  await expect(
+    page.getByText(`${inviteEmail} 계정에 보낼 초대를 만들었습니다.`)
+  ).toBeVisible();
+  const inviteRow = page.getByRole("listitem").filter({ hasText: inviteEmail });
+  await expect(inviteRow).toContainText("조회 전용");
+});
+
+test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터가 남지 않는다", async ({
+  page,
+}) => {
+  await page.goto("/status");
+  await selectPressed(page.getByRole("button", { name: /^거의 없음/ }));
+  await page.evaluate(() => {
+    document.documentElement.dataset.initialHomeLoadingReappeared = "false";
+    const observer = new MutationObserver(() => {
+      if (document.body.textContent?.includes("오늘 기록을 불러오는 중입니다.")) {
+        document.documentElement.dataset.initialHomeLoadingReappeared = "true";
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+
+  const spaceSelect = page
+    .getByRole("navigation", { name: "가족 공간과 계정" })
+    .getByRole("combobox");
+  await spaceSelect.selectOption("mock-second-care-space");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 2, name: "메스티논", exact: true })
+  ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.dataset.initialHomeLoadingReappeared
+      )
+    )
+    .toBe("false");
+
+  await page.goto("/status");
+  await expect(page.getByRole("button", { name: /^거의 없음/ })).toHaveAttribute(
+    "aria-pressed",
+    "false"
+  );
+});
+
+test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시한다", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "내 기록을 안전하게 이어가세요" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "가족 공간과 계정" })
+  ).toHaveCount(0);
+  await expect(page.getByText("메스티논", { exact: true })).toHaveCount(0);
+});
+
 test("파비콘, 설치용 앱 아이콘과 알림 배지를 제공한다", async ({ page }) => {
   await page.goto("/");
 

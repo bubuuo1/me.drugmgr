@@ -10,6 +10,18 @@
 
 새 Vercel 계정에 `me-drugmgr` 프로젝트를 만들고 `bubuuo1/me.drugmgr`를 Git Integration으로 연결해 Preview/Production 배포 흐름을 사용한다.
 
+Google 로그인 운영 설정은 코드 저장소 밖에서 완료한다.
+
+1. 운영 DB를 백업하고 `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`을 적용한다.
+2. Google Cloud OAuth 동의 화면을 구성하고 웹 애플리케이션 OAuth Client ID/Secret을 만든다.
+3. Google 승인된 redirect URI에 `https://<project-ref>.supabase.co/auth/v1/callback`을 등록한다.
+4. Supabase Authentication > Providers > Google에 Client ID/Secret을 저장하고 공급자를 활성화한다.
+5. Supabase Auth Site URL을 `https://<app>`으로 설정하고 Redirect URLs에 `https://<app>/auth/callback`, `http://localhost:3000/auth/callback`과 실제 사용할 Preview callback을 등록한다.
+6. Google 로그인 후 Supabase Authentication에서 실제 사용자 UUID를 확인하고 미지정 legacy 공간 `00000000-0000-4000-8000-000000000100`에 소유자 멤버십을 수동 지정한다. 첫 로그인 사용자에게 자동 지정하지 않는다.
+7. 사용자 격리와 역할별 거부 테스트를 통과한 뒤 각 사용자가 필요한 복약 공간·기기에서 Push 알림을 다시 켠다.
+
+현재 인증 구현은 브라우저의 실제 origin에 `/auth/callback`을 결합하므로 `NEXT_PUBLIC_SITE_URL` 환경변수를 사용하지 않는다. Google Client Secret을 `.env.local`, Vercel의 `NEXT_PUBLIC_*` 또는 Git에 넣지 않는다.
+
 Web Push 운영에는 다음 서버 설정이 필요하다.
 
 - Vercel 공개 변수: `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
@@ -21,17 +33,31 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 ## 2. P0 — 데이터 정확성과 운영 기반
 
-### Phase 0.1 스키마 reset
+### Phase 0.0 Google 인증·복약 공간·가족 공유
 
-- [ ] 기존 개발 데이터 보존 없이 스키마 재생성
+- [x] Supabase SSR 브라우저·서버 클라이언트와 세션 갱신 proxy
+- [x] Google 로그인, OAuth callback, 로그아웃과 mock 테스트 우회
+- [x] 새 사용자의 빈 개인 복약 공간 자동 생성
+- [x] 소유자·보호자·조회자 역할과 `auth.uid()` 기반 RLS
+- [x] 확인된 이메일 기반 초대 생성·수락·거절·취소
+- [x] 현재 복약 공간 선택과 공간 전환 시 데이터 격리
+- [x] 사용자·기기·복약 공간별 Push 대상 연결
+- [x] 기존 데이터를 미지정 legacy 공간에 보존
+
+### Phase 0.1 스키마 마이그레이션
+
+- [x] 기존 약·일정·로그·상태를 legacy 공간에 보존
+- [x] `profiles`, `care_spaces`, `care_space_members`, `care_space_invites`
+- [x] 도메인 테이블의 `care_space_id`, `created_by`, `updated_by`
 - [ ] `quantity_options`
 - [ ] `client_request_id` unique
 - [ ] 약 이름·단위·일정 시각 스냅샷
 - [ ] `is_extra`, `deleted_at`
-- [ ] 상태 날짜 unique
+- [ ] 공간+상태 날짜 unique
 - [ ] 수량 check, FK, 인덱스
 - [ ] snapshot과 `updated_at` trigger
-- [ ] anon RLS 정책과 허용/거부 테스트
+- [x] anon 앱 데이터 권한 제거와 authenticated 역할별 RLS 정책
+- [ ] 서로 관계없는 사용자·공유 공간의 허용/거부 통합 테스트
 
 ### Phase 0.2 Supabase 단일 저장소
 
@@ -39,7 +65,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 - [ ] mock 외의 fallback DB 제거
 - [ ] 운영 환경변수 검증
 - [ ] publishable key와 legacy anon key 호환
-- [ ] 브라우저 세션·로컬 영구 저장 비활성화
+- [x] 인증 세션 쿠키 사용, 건강 기록의 브라우저 영구 저장 비활성화
 - [ ] 조회 로딩·빈 상태·오류 구분
 
 ### Phase 0.3 쓰기 신뢰성
@@ -115,7 +141,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 - [x] manifest의 앱 id·scope와 홈 화면 아이콘
 - [x] 캐시 없는 push 전용 서비스 워커
-- [x] 설정 화면의 기기별 알림 켜기·테스트·끄기
+- [x] 설정 화면의 사용자·기기·선택 공간별 알림 켜기·테스트·끄기
 - [x] iOS/iPadOS 16.4 이상 홈 화면 설치 안내
 - [x] private 구독·발송 테이블과 제한 RPC
 - [x] Vault 비밀값을 사용하는 Supabase 매분 Cron
@@ -129,6 +155,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 - [x] 일정·한국 날짜별 push topic과 일정 알림 TTL 0
 - [x] 중단·일시 실패 시 5분 이내 최대 3회 재시도와 시도 번호 검증
 - [x] 만료 구독 비활성화와 전송 결과 기록
+- [x] 발송 생성·직전의 공간 멤버십 재검증과 권한 회수 시 대상 삭제
 - [x] 알림 클릭 시 해당 투약 기록 화면 열기
 - [x] 약 이름·예정 시각 알림 문구, 단색 캡슐 badge와 클릭한 일정 알림 정리
 - [x] 알림 지연 가능성과 미복용 판정 아님을 안내
@@ -137,6 +164,14 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 ### 단위·통합 테스트 대상
 
+- OAuth callback code 교환 실패와 안전한 내부 redirect
+- 인증 없는 보호 경로의 로그인 redirect
+- 새 사용자의 빈 개인 복약 공간 생성
+- 관계없는 두 사용자의 RLS 격리
+- 소유자·보호자·조회자별 허용 및 거부 동작
+- 확인된 이메일이 일치하는 초대만 수락·거절
+- 공간 전환 시 이전 공간 데이터가 남지 않음
+- 사용자·기기·공간 Push opt-in과 멤버십 회수 후 발송 제외
 - KST 날짜 변환과 자정 경계
 - 수량 검증
 - 일정 연결과 추가 복용 분류
@@ -146,12 +181,12 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 
 ### Playwright
 
-Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 프로세스의 메모리에만 존재하며 다음을 사용하지 않는다.
+Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용하고 외부 Google/Supabase 인증을 우회한다. mock은 테스트 프로세스의 메모리에만 존재하며 다음을 사용하지 않는다.
 
 - 실제 Supabase
 - localStorage
 - IndexedDB
-- 쿠키
+- 운영 인증 쿠키
 - 파일 기반 영구 저장
 
 핵심 E2E:
@@ -168,6 +203,9 @@ Playwright는 `NEXT_PUBLIC_USE_MOCK_DB=true`를 사용한다. mock은 테스트 
 - 서비스 워커가 같은 논리 일정 알림을 찾아 닫고 `silent: false`인 새 알림과 진동 패턴을 요청함
 - 96x96 단색 캡슐 알림 badge와 알림 클릭 후 같은 일정 표시 정리
 - 설정 화면의 알림 상태와 기기별 제어
+- 복약 공간 선택과 역할 표시
+- 가족 초대 생성·수락·거절·취소
+- 조회자의 쓰기 UI 차단과 보호자의 설정 관리 차단
 - 한 약에 두 복용·알림 시간을 추가 버튼 재클릭 없이 연속 저장하고 각각 수정·삭제
 - 비밀값이 없거나 잘못된 Vercel 발송 API 요청 거부
 
@@ -206,6 +244,9 @@ npx playwright install chromium
 - production build 성공
 - Playwright 핵심 흐름 성공
 - 운영 모드가 Supabase 외 저장소를 사용하지 않음
+- 보호 경로가 Google 로그인 세션을 요구함
+- 관계없는 복약 공간은 RLS와 복합 FK로 격리됨
+- 역할별 쓰기 범위와 확인된 이메일 초대 수락이 DB에서 강제됨
 - 실패한 쓰기를 성공으로 표시하지 않음
 - 반복 제출로 중복 로그가 생기지 않음
 - 한국 날짜 경계와 과거 스냅샷 테스트 통과
@@ -213,16 +254,16 @@ npx playwright install chromium
 - 발송 API, Supabase 발송 RPC와 Cron 비밀값이 브라우저나 Git 저장소에 노출되지 않음
 - 이미 기록했거나 비활성·삭제된 일정과 중복 발송이 DB 규칙 및 발송 직전 재검증으로 제외됨
 - 기록 전 5분 회차와 한국 날짜 자정 종료가 DB 규칙으로 계산됨
-- P0/P1 제외 기능을 새 의존성이나 UI로 추가하지 않음
+- 초대 이메일 자동 발송 등 제외 기능을 새 의존성이나 UI로 추가하지 않음
 
 ## 8. 명시적 제외
 
-- 인증, 접근 코드, 기기 승인
+- 비밀번호·SMS 로그인, 접근 코드, 기기 승인 목록
 - localStorage, IndexedDB, 오프라인 캐시·큐·동기화
 - 백업·복원, CSV/PDF
 - 미복용·지연 복용 판정과 알림의 정시·필수 도착 보장
 - 통계·그래프·추이
-- 역할·초대·공유 관리
+- 초대 안내 이메일 자동 발송
 - AI 분석과 의료 판단
 
 위 항목은 개발 backlog가 아니라 현재 제품 범위에서 제외된 결정이다.

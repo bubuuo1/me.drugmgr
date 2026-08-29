@@ -11,6 +11,10 @@ export type PushActionResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
+export type PushStatusActionResult =
+  | { ok: true; registered: boolean }
+  | { ok: false; message: string };
+
 export type DuePushNotification = {
   delivery_id: string;
   attempt_count: number;
