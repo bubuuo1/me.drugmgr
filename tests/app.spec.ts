@@ -100,6 +100,49 @@ test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인
   ).toBeVisible();
 });
 
+test("파비콘과 설치용 앱 아이콘을 제공한다", async ({ page }) => {
+  await page.goto("/");
+
+  const assetHrefs = await Promise.all([
+    page.locator('link[rel="icon"][href*="favicon.ico"]').getAttribute("href"),
+    page.locator('link[rel="icon"][href*="icon.svg"]').getAttribute("href"),
+    page.locator('link[rel="apple-touch-icon"]').getAttribute("href"),
+  ]);
+
+  for (const href of assetHrefs) {
+    expect(href).not.toBeNull();
+    const response = await page.request.get(new URL(href ?? "/", page.url()).href);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toContain("image");
+  }
+
+  const manifestHref = await page
+    .locator('link[rel="manifest"]')
+    .getAttribute("href");
+  expect(manifestHref).not.toBeNull();
+  const manifestResponse = await page.request.get(
+    new URL(manifestHref ?? "/manifest.webmanifest", page.url()).href
+  );
+  expect(manifestResponse.status()).toBe(200);
+  const manifest = await manifestResponse.json();
+  expect(manifest).toMatchObject({
+    icons: [
+      {
+        src: "/icon-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icon-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any",
+      },
+    ],
+  });
+});
+
 test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 이어진다", async ({
   page,
 }) => {
