@@ -68,11 +68,16 @@ test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인
 }) => {
   await page.goto("/");
 
+  const quickLogSection = page.locator("main > :first-child");
   await expect(
-    page
-      .locator("main > :first-child")
-      .getByRole("heading", { level: 1, name: "빠른 투약 기록" })
-  ).toBeVisible();
+    quickLogSection.getByRole("heading", {
+      level: 1,
+      name: "빠른 투약 기록",
+    })
+  ).toHaveClass(/sr-only/);
+  await expect(
+    page.getByText("복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.")
+  ).toHaveCount(0);
 
   for (const medicationName of ["메스티논", "소론도", "셉트린정"]) {
     const medicationCard = page.getByRole("article").filter({

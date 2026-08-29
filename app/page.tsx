@@ -67,14 +67,9 @@ export default function Home() {
     return (
       <main className="flex flex-1 flex-col gap-6">
         <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
-          <div>
-            <h1 id="quick-log-title" className="text-2xl font-bold text-ink">
-              빠른 투약 기록
-            </h1>
-            <p className="mt-1 text-base leading-relaxed text-muted">
-              복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.
-            </p>
-          </div>
+          <h1 id="quick-log-title" className="sr-only">
+            빠른 투약 기록
+          </h1>
           <LoadingState label="오늘 기록을 불러오는 중입니다." />
         </section>
       </main>
@@ -84,14 +79,9 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col gap-7">
       <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
-        <div>
-          <h1 id="quick-log-title" className="text-2xl font-bold text-ink">
-            빠른 투약 기록
-          </h1>
-          <p className="mt-1 text-base leading-relaxed text-muted">
-            복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.
-          </p>
-        </div>
+        <h1 id="quick-log-title" className="sr-only">
+          빠른 투약 기록
+        </h1>
 
         {loading && (
           <p
