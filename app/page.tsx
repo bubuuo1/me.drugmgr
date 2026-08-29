@@ -66,46 +66,48 @@ export default function Home() {
   if (loading && medications.length === 0) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <header className="pt-3">
-          <h1 className="text-2xl font-bold text-ink">투약 관리</h1>
-        </header>
-        <LoadingState label="오늘 기록을 불러오는 중입니다." />
+        <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
+          <div>
+            <h1 id="quick-log-title" className="text-2xl font-bold text-ink">
+              빠른 투약 기록
+            </h1>
+            <p className="mt-1 text-base leading-relaxed text-muted">
+              복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.
+            </p>
+          </div>
+          <LoadingState label="오늘 기록을 불러오는 중입니다." />
+        </section>
       </main>
     );
   }
 
   return (
     <main className="flex flex-1 flex-col gap-7">
-      <header className="pt-3">
-        <h1 className="text-2xl font-bold leading-snug text-ink">투약 관리</h1>
-        <p className="mt-1 text-lg text-muted">오늘의 기록</p>
-      </header>
-
-      {loading && (
-        <p
-          role="status"
-          className="rounded-xl bg-surface-soft px-4 py-3 text-center text-base font-semibold text-body"
-        >
-          최신 기록을 확인하고 있습니다.
-        </p>
-      )}
-
-      <ErrorBanner
-        message={error}
-        onRetry={retry}
-        onDismiss={clearError}
-        retrying={refreshing}
-      />
-
       <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
         <div>
-          <h2 id="quick-log-title" className="text-xl font-bold text-ink">
+          <h1 id="quick-log-title" className="text-2xl font-bold text-ink">
             빠른 투약 기록
-          </h2>
+          </h1>
           <p className="mt-1 text-base leading-relaxed text-muted">
             복용한 약을 선택하면 수량과 실제 시각을 확인할 수 있습니다.
           </p>
         </div>
+
+        {loading && (
+          <p
+            role="status"
+            className="rounded-xl bg-surface-soft px-4 py-3 text-center text-base font-semibold text-body"
+          >
+            최신 기록을 확인하고 있습니다.
+          </p>
+        )}
+
+        <ErrorBanner
+          message={error}
+          onRetry={retry}
+          onDismiss={clearError}
+          retrying={refreshing}
+        />
 
         {medications.length === 0 ? (
           <div className="rounded-2xl border border-hairline px-5 py-5">
@@ -142,7 +144,7 @@ export default function Home() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h3 className="text-xl font-bold text-ink">{medication.name}</h3>
+                    <h2 className="text-xl font-bold text-ink">{medication.name}</h2>
                     <p className="mt-1 text-base text-body">
                       {latest
                         ? `마지막 기록 ${formatDateTime(latest.taken_at)}`

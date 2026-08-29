@@ -69,16 +69,15 @@ test("홈에서 빠른 기록, 상태, 기록 확인, 설정 진입점이 보인
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "투약 관리" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { level: 2, name: "빠른 투약 기록" })
+    page
+      .locator("main > :first-child")
+      .getByRole("heading", { level: 1, name: "빠른 투약 기록" })
   ).toBeVisible();
 
   for (const medicationName of ["메스티논", "소론도", "셉트린정"]) {
     const medicationCard = page.getByRole("article").filter({
       has: page.getByRole("heading", {
-        level: 3,
+        level: 2,
         name: medicationName,
         exact: true,
       }),
@@ -213,7 +212,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .click();
   const homeMedicationCard = page.getByRole("article").filter({
     has: page.getByRole("heading", {
-      level: 3,
+      level: 2,
       name: testMedicationName,
       exact: true,
     }),
@@ -362,7 +361,7 @@ test("같은 약을 최근 시각에 다시 저장하면 중복 확인을 거친
   await page.goto("/");
   const mestinonCard = page.getByRole("article").filter({
     has: page.getByRole("heading", {
-      level: 3,
+      level: 2,
       name: "메스티논",
       exact: true,
     }),
