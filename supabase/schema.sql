@@ -77,13 +77,9 @@ create table public.medication_schedules (
   medication_id uuid not null
     references public.medications(id) on update restrict on delete restrict,
   time time(0) without time zone not null,
-  default_quantity numeric(8,3) not null default 1,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint medication_schedules_quantity_valid check (
-    default_quantity > 0 and default_quantity <= 1000
-  ),
   constraint medication_schedules_medication_time_unique
     unique (medication_id, time)
 );
@@ -329,9 +325,9 @@ grant update (name, unit, active, quantity_options)
   on table public.medications to anon;
 
 grant select on table public.medication_schedules to anon;
-grant insert (medication_id, time, default_quantity, active)
+grant insert (medication_id, time, active)
   on table public.medication_schedules to anon;
-grant update (time, default_quantity, active)
+grant update (time, active)
   on table public.medication_schedules to anon;
 grant delete on table public.medication_schedules to anon;
 

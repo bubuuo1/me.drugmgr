@@ -253,16 +253,15 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await scheduleForm
     .getByLabel("예정 시각", { exact: true })
     .fill(keptScheduleTime);
-  await scheduleForm
-    .getByLabel("예정 수량 (정)", { exact: true })
-    .fill("1.5");
+  await expect(scheduleForm.getByText(/예정 수량/)).toHaveCount(0);
+  await expect(scheduleForm.locator('input[type="number"]')).toHaveCount(0);
   await scheduleForm
     .getByRole("button", { name: "이 시간 추가", exact: true })
     .click();
   await expect(
     settingsCard
       .getByRole("listitem")
-      .filter({ hasText: keptScheduleTime + " · 1.5정" })
+      .filter({ hasText: keptScheduleTime })
   ).toBeVisible();
   await expect(
     settingsCard.getByRole("heading", {
@@ -277,13 +276,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(scheduleForm.getByLabel("예정 시각", { exact: true })).toHaveValue(
     ""
   );
-  await expect(
-    scheduleForm.getByLabel("예정 수량 (정)", { exact: true })
-  ).toHaveValue("");
   await scheduleForm.getByLabel("예정 시각", { exact: true }).fill("22:43");
-  await scheduleForm
-    .getByLabel("예정 수량 (정)", { exact: true })
-    .fill("0.5");
   await scheduleForm
     .getByRole("button", { name: "이 시간 추가", exact: true })
     .click();
@@ -311,7 +304,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
 
   let temporarySchedule = settingsCard
     .getByRole("listitem")
-    .filter({ hasText: "22:43 · 0.5정" });
+    .filter({ hasText: "22:43" });
   await temporarySchedule
     .getByRole("button", {
       name: `${testMedicationName} 22:43 수정`,
@@ -324,16 +317,15 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await editScheduleForm
     .getByLabel("예정 시각", { exact: true })
     .fill(editedScheduleTime);
-  await editScheduleForm
-    .getByLabel("예정 수량 (정)", { exact: true })
-    .fill("1");
+  await expect(editScheduleForm.getByText(/예정 수량/)).toHaveCount(0);
+  await expect(editScheduleForm.locator('input[type="number"]')).toHaveCount(0);
   await editScheduleForm
     .getByRole("button", { name: "일정 수정 저장", exact: true })
     .click();
 
   temporarySchedule = settingsCard
     .getByRole("listitem")
-    .filter({ hasText: editedScheduleTime + " · 1정" });
+    .filter({ hasText: editedScheduleTime });
   await expect(temporarySchedule).toBeVisible();
   await temporarySchedule
     .getByRole("button", {
@@ -352,7 +344,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(
     settingsCard
       .getByRole("listitem")
-      .filter({ hasText: editedScheduleTime + " · 1정" })
+      .filter({ hasText: editedScheduleTime })
   ).toHaveCount(0);
 
   await settingsCard
@@ -405,6 +397,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     name: keptScheduleTime + " 예정 기록",
     exact: true,
   });
+  await expect(page.getByText(/예정 수량/)).toHaveCount(0);
   const scheduledHref = await scheduledLink.getAttribute("href");
   expect(scheduledHref).not.toBeNull();
   const scheduleId = new URL(scheduledHref!, "http://localhost").searchParams.get(
@@ -428,6 +421,10 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     })
   ).toBeVisible();
   await expect(
+    page.getByRole("button", { name: "0.5정", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "1.5정", exact: true }).click();
+  await expect(
     page.getByRole("button", { name: "1.5정", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
   await page
@@ -439,6 +436,9 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await page.getByRole("button", { name: "기록 저장", exact: true }).click();
   await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
     "기록 완료"
+  );
+  await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
+    "1.5정"
   );
   await page.getByRole("link", { name: "첫 화면으로", exact: true }).click();
 

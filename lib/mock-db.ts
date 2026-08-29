@@ -187,7 +187,6 @@ export class MockDbRepository implements DbRepository {
       id: id(),
       medication_id: input.medication_id,
       time: input.time,
-      default_quantity: input.default_quantity,
       active: input.active ?? true,
       created_at: timestamp,
       updated_at: timestamp,

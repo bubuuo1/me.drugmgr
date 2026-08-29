@@ -303,7 +303,6 @@ export function DbProvider({ children }: PropsWithChildren) {
       const prepared: AddScheduleInput = {
         medication_id: input.medication_id,
         time: normalizedTime(input.time),
-        default_quantity: assertQuantity(input.default_quantity, "기본 복용량"),
         active: input.active ?? true,
       };
       const row = await run(() => repository.addSchedule(prepared));
@@ -322,10 +321,6 @@ export function DbProvider({ children }: PropsWithChildren) {
       const prepared: UpdateScheduleInput = {
         ...patch,
         time: patch.time === undefined ? undefined : normalizedTime(patch.time),
-        default_quantity:
-          patch.default_quantity === undefined
-            ? undefined
-            : assertQuantity(patch.default_quantity, "기본 복용량"),
       };
       const row = await run(() => repository.updateSchedule(id, prepared));
       setDb((current) => ({

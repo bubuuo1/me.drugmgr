@@ -45,12 +45,11 @@ Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마
 | `id` | uuid | PK |
 | `medication_id` | uuid | `medications.id` FK |
 | `time` | time(0) | 한국 현지 예정 시각 |
-| `default_quantity` | numeric | 0보다 큼 |
 | `active` | boolean | 기본 `true` |
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 수정 시각 |
 
-한 약에 서로 다른 예정 시각을 여러 개 저장할 수 있고, 같은 약에 같은 예정 시각만 중복 생성하지 않는다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정하거나 삭제해도 기존 로그의 `schedule_time` 스냅샷은 변경하지 않는다.
+한 약에 서로 다른 예정 시각을 여러 개 저장할 수 있고, 같은 약에 같은 예정 시각만 중복 생성하지 않는다. 일정은 알림 시각만 관리하며 실제 수량은 투약 로그에 저장한다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정하거나 삭제해도 기존 로그의 `schedule_time` 스냅샷은 변경하지 않는다.
 
 ## 4. medication_logs
 

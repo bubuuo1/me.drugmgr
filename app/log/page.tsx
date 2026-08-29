@@ -60,9 +60,7 @@ function MedLogInner() {
   );
   const booleanOnly = medication ? isBooleanOnly(medication) : false;
   const quantities = medication ? quantityOptionsOf(medication) : [];
-  const defaultQuantity = booleanOnly
-    ? 1
-    : schedule?.default_quantity || quantities[0] || 1;
+  const defaultQuantity = booleanOnly ? 1 : quantities[0] || 1;
 
   const [quantity, setQuantity] = useState<string | null>(null);
   const [takenAt, setTakenAt] = useState(() =>

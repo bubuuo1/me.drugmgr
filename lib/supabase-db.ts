@@ -114,7 +114,6 @@ export class SupabaseDbRepository implements DbRepository {
       .insert({
         medication_id: input.medication_id,
         time: input.time,
-        default_quantity: input.default_quantity,
         active: input.active ?? true,
       })
       .select()

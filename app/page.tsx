@@ -232,12 +232,6 @@ export default function Home() {
                         <p className="text-lg font-bold text-ink">
                           {schedule.time} · {medication.name}
                         </p>
-                        {!isBooleanOnly(medication) && (
-                          <p className="text-base text-body">
-                            예정 수량 {schedule.default_quantity}
-                            {medication.unit}
-                          </p>
-                        )}
                       </div>
                       <span className="font-bold text-muted">기록하기</span>
                     </Link>

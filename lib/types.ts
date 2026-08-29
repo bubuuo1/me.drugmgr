@@ -12,7 +12,6 @@ export type MedicationSchedule = {
   id: string;
   medication_id: string;
   time: string;
-  default_quantity: number;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -68,12 +67,11 @@ export type UpdateMedicationInput = Partial<
 export type AddScheduleInput = {
   medication_id: string;
   time: string;
-  default_quantity: number;
   active?: boolean;
 };
 
 export type UpdateScheduleInput = Partial<
-  Pick<MedicationSchedule, "time" | "default_quantity" | "active">
+  Pick<MedicationSchedule, "time" | "active">
 >;
 
 export type AddMedicationLogInput = {

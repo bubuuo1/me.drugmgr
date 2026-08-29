@@ -25,7 +25,6 @@ type MedicationDraft = {
 
 type ScheduleDraft = {
   time: string;
-  quantity: string;
 };
 
 type Confirmation =
@@ -84,11 +83,10 @@ export default function SettingsPage() {
   const [addingScheduleFor, setAddingScheduleFor] = useState<string | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft>({
     time: "",
-    quantity: "",
   });
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [editingScheduleDraft, setEditingScheduleDraft] =
-    useState<ScheduleDraft>({ time: "", quantity: "" });
+    useState<ScheduleDraft>({ time: "" });
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -211,17 +209,14 @@ export default function SettingsPage() {
 
   function startScheduleAdd(medication: Medication) {
     setAddingScheduleFor(medication.id);
-    setScheduleDraft({
-      time: "",
-      quantity: isBooleanOnly(medication) ? "1" : "",
-    });
+    setScheduleDraft({ time: "" });
     setFieldError(null);
     setSuccess(null);
   }
 
   function closeScheduleAdd() {
     setAddingScheduleFor(null);
-    setScheduleDraft({ time: "", quantity: "" });
+    setScheduleDraft({ time: "" });
     setFieldError(null);
     setSuccess(null);
   }
@@ -231,25 +226,15 @@ export default function SettingsPage() {
     setFieldError(null);
     setSuccess(null);
     try {
-      const quantity = isBooleanOnly(medication)
-        ? 1
-        : Number(scheduleDraft.quantity);
       if (!scheduleDraft.time) throw new Error("예정 시각을 입력해 주세요.");
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error("예정 수량을 0보다 큰 숫자로 입력해 주세요.");
-      }
       beginMutation(`schedule-add-${medication.id}`);
       const addedTime = scheduleDraft.time;
       await addSchedule({
         medication_id: medication.id,
         time: addedTime,
-        default_quantity: quantity,
         active: true,
       });
-      setScheduleDraft({
-        time: "",
-        quantity: isBooleanOnly(medication) ? "1" : "",
-      });
+      setScheduleDraft({ time: "" });
       setSuccess(
         `${medication.name} ${addedTime} 시간을 추가했습니다. 다른 시간도 이어서 추가할 수 있습니다.`
       );
@@ -262,10 +247,7 @@ export default function SettingsPage() {
 
   function startScheduleEdit(schedule: MedicationSchedule) {
     setEditingScheduleId(schedule.id);
-    setEditingScheduleDraft({
-      time: schedule.time,
-      quantity: String(schedule.default_quantity),
-    });
+    setEditingScheduleDraft({ time: schedule.time });
     setFieldError(null);
     setSuccess(null);
   }
@@ -276,19 +258,12 @@ export default function SettingsPage() {
   ) {
     if (pendingKey || !online) return;
     try {
-      const quantity = isBooleanOnly(medication)
-        ? 1
-        : Number(editingScheduleDraft.quantity);
       if (!editingScheduleDraft.time) {
         throw new Error("예정 시각을 입력해 주세요.");
-      }
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error("예정 수량을 0보다 큰 숫자로 입력해 주세요.");
       }
       beginMutation(`schedule-${schedule.id}`);
       await updateSchedule(schedule.id, {
         time: editingScheduleDraft.time,
-        default_quantity: quantity,
       });
       await dismissScheduleNotifications(schedule.id);
       setEditingScheduleId(null);
@@ -510,7 +485,6 @@ export default function SettingsPage() {
                   {medication.active && addingScheduleFor === medication.id && (
                     <div className="mt-4">
                       <ScheduleForm
-                        medication={medication}
                         legend={`${medication.name} 새 복용·알림 시간 입력`}
                         draft={scheduleDraft}
                         setDraft={setScheduleDraft}
@@ -537,8 +511,6 @@ export default function SettingsPage() {
                               <div>
                                 <p className="text-lg font-bold text-ink">
                                   {schedule.time}
-                                  {!isBooleanOnly(medication) &&
-                                    ` · ${schedule.default_quantity}${medication.unit}`}
                                 </p>
                                 <p
                                   className={`text-base font-semibold ${
@@ -568,7 +540,6 @@ export default function SettingsPage() {
                             {scheduleEditing && (
                               <div className="mt-4">
                                 <ScheduleForm
-                                  medication={medication}
                                   legend={`${medication.name} ${schedule.time} 복용·알림 시간 수정`}
                                   draft={editingScheduleDraft}
                                   setDraft={setEditingScheduleDraft}
@@ -766,7 +737,6 @@ function MedicationForm({
 }
 
 type ScheduleFormProps = {
-  medication: Medication;
   legend: string;
   draft: ScheduleDraft;
   setDraft: (draft: ScheduleDraft) => void;
@@ -777,7 +747,6 @@ type ScheduleFormProps = {
 };
 
 function ScheduleForm({
-  medication,
   legend,
   draft,
   setDraft,
@@ -801,22 +770,6 @@ function ScheduleForm({
           className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
         />
       </label>
-      {!isBooleanOnly(medication) && (
-        <label className="flex flex-col gap-2 text-base font-bold text-body">
-          예정 수량 ({medication.unit})
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0.01"
-            step="any"
-            value={draft.quantity}
-            onChange={(event) =>
-              setDraft({ ...draft, quantity: event.target.value })
-            }
-            className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
-          />
-        </label>
-      )}
       <button
         type="button"
         onClick={() => void onSave()}
