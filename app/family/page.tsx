@@ -49,6 +49,7 @@ export default function FamilyPage() {
     canManageFamily,
     loading,
     error,
+    refresh,
     clearError,
     refreshFamily,
     createCareSpaceInvite,
@@ -186,6 +187,19 @@ export default function FamilyPage() {
           backLabel="환경설정"
         />
         <LoadingState label="가족 공간을 불러오는 중입니다." />
+      </main>
+    );
+  }
+
+  if (error && !selectedCareSpace) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader
+          title="가족 공유"
+          backHref="/settings"
+          backLabel="환경설정"
+        />
+        <ErrorBanner message={error} onRetry={refresh} />
       </main>
     );
   }

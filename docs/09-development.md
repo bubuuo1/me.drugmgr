@@ -27,7 +27,7 @@ Google 로그인 운영 설정은 코드 저장소 밖에서 완료한다.
 
 1. 운영 DB를 백업한다.
 2. `supabase/migrations/20260829110749_add_multi_user_family_auth.sql`, `supabase/migrations/20260830023000_rate_limit_family_invite_email.sql`, `supabase/migrations/20260830030000_harden_family_invite_email_rate_limits.sql`, `supabase/migrations/20260830033000_release_push_endpoint_on_logout.sql`, `supabase/migrations/20260830040000_protect_family_invite_email_claim.sql`, `supabase/migrations/20260830050000_soft_delete_medications_preserve_logs.sql`, `supabase/migrations/20260830050001_allow_caregiver_medication_management.sql`, `supabase/migrations/20260830050002_enforce_record_integrity.sql`을 순서대로 적용한다.
-3. 기존 빈 상태 행이 없는지 확인하고, 발견되면 의료적 추정으로 값을 채우지 말고 데이터 소유자와 처리 방침을 확정한다. 빈 행이 없을 때 `supabase/migrations/20260830050003_validate_daily_status_content.sql`, `supabase/migrations/20260830050004_reject_whitespace_only_daily_status.sql`, `supabase/migrations/20260830050005_restrict_direct_record_mutations.sql`을 순서대로 적용한다.
+3. 기존 빈 상태 행이 없는지 확인하고, 발견되면 의료적 추정으로 값을 채우지 말고 데이터 소유자와 처리 방침을 확정한다. 빈 행이 없을 때 `supabase/migrations/20260830050003_validate_daily_status_content.sql`, `supabase/migrations/20260830050004_reject_whitespace_only_daily_status.sql`, `supabase/migrations/20260830050005_restrict_direct_record_mutations.sql`, `supabase/migrations/20260830050006_restrict_medication_log_classification.sql`을 순서대로 적용한다.
 4. legacy 데이터 행 수와 약·일정·로그 스냅샷이 유지되는지 확인한다.
 
 ### 공통 OAuth·운영 연결
@@ -142,6 +142,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 - [ ] 날짜·홈 조회를 서버 날짜 범위 쿼리로 제한하기
 - [x] 삭제된 일정 로그를 편집할 때 사용자가 새 분류를 고르기 전 `is_extra = false`와 예정 스냅샷 유지
 - [x] 일반 기록 편집에서 `medication_id`를 바꾸지 못하도록 DB update column grant와 repository 입력 제한
+- [x] `schedule_id`·`is_extra` 직접 update 권한을 제거하고 검증 RPC에서만 명시적 재분류 허용
 
 ### Phase 0.5 핵심 화면 안정화
 
@@ -228,9 +229,10 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 |---|---|
 | 중복 사용자 요청의 우선순위가 불명확함 | 같은 주제는 마지막 사용자 요청을 정본으로 삼는 규칙을 `docs/README.md`에 고정했다. |
 | 누락·무효·비활성 일정 링크가 조용히 추가 복용으로 바뀜 | `schedule=<id>`가 유효하지 않고 `extra=1`도 없으면 저장 폼을 제공하지 않는다. 사용자가 추가 복용 또는 첫 화면 재선택을 명시해야 한다. |
-| 최초 공간 조회 실패가 정상 빈 화면과 함께 보이고 재시도할 수 없음 | 선택 공간이 없는 조회 오류는 오류 화면만 표시하고, 재시도는 공간 목록부터 다시 조회한다. |
+| 최초 공간 조회 실패가 정상 빈 화면과 함께 보이고 재시도할 수 없음 | 홈·복용기록·환경설정·가족 공유에서 선택 공간이 없는 조회 오류는 오류 화면만 표시하고 하단 메뉴를 숨긴다. 재시도는 공간 목록부터 다시 조회한다. |
 | 약 `deleted_at` 직접 update가 연결 일정 비활성화 RPC를 우회함 | 직접 update 권한을 제거하고 호출 사용자·역할을 검사하는 원자적 soft-delete RPC만 허용한다. |
 | 상태 `date` 직접 update로 기록 날짜를 이동할 수 있음 | `date` update 권한을 제거하고 날짜별 제한 upsert RPC를 사용한다. |
+| 로그 `schedule_id`·`is_extra` 직접 update로 삭제 일정 전용 분류를 위조할 수 있음 | 두 분류 필드의 직접 update 권한을 제거하고, 호출 사용자·역할·로그·일정·약 관계를 검사하는 원자적 재분류 RPC만 허용한다. |
 | 탭·줄바꿈만 있는 상태 메모가 DB check를 통과함 | POSIX whitespace를 기준으로 비공백 문자가 하나 이상 있어야 하도록 검증 제약을 강화했다. |
 | Push 서버 액션이 Supabase 원문 오류를 반환할 수 있음 | 사용자 입력·인증·권한·설정·연결 오류를 제한된 문구로 매핑하고 원문은 반환하지 않는다. |
 | CSS 토큰 유일 정의 규칙과 manifest/viewport 리터럴이 충돌함 | CSS 변수를 읽지 못하는 플랫폼 메타데이터만 명시적 예외로 두고 manifest·viewport 값을 E2E로 고정한다. |

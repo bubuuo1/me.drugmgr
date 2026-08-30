@@ -464,9 +464,43 @@ export class SupabaseDbRepository implements DbRepository {
     id: string,
     patch: UpdateMedicationLogInput
   ): Promise<MedicationLog> {
+    const updatesClassification =
+      patch.schedule_id !== undefined || patch.is_extra !== undefined;
+    if (updatesClassification) {
+      if (patch.schedule_id === undefined || patch.is_extra === undefined) {
+        throw new Error(
+          "투약 기록의 일정 연결과 추가 복용 분류는 함께 변경해야 합니다."
+        );
+      }
+
+      const { data, error } = await requireSupabase().rpc(
+        "reclassify_medication_log",
+        {
+          p_care_space_id: careSpaceId,
+          p_is_extra: patch.is_extra,
+          p_log_id: id,
+          p_note: patch.note ?? null,
+          p_quantity: patch.quantity ?? null,
+          p_schedule_id: patch.schedule_id,
+          p_taken_at: patch.taken_at ?? null,
+          p_update_note: patch.note !== undefined,
+          p_update_quantity: patch.quantity !== undefined,
+          p_update_taken_at: patch.taken_at !== undefined,
+        }
+      );
+      if (error) throw failure("투약 기록 분류 수정", error);
+      return normalizeLog(data);
+    }
+
     const { data, error } = await requireSupabase()
       .from("medication_logs")
-      .update(definedPatch(patch))
+      .update(
+        definedPatch({
+          note: patch.note,
+          quantity: patch.quantity,
+          taken_at: patch.taken_at,
+        })
+      )
       .eq("care_space_id", careSpaceId)
       .eq("id", id)
       .select()

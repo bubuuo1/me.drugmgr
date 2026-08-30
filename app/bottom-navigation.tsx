@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useDb } from "@/lib/store";
 
 const items = [
   { href: "/", label: "첫 화면" },
@@ -17,8 +18,13 @@ function isCurrentPath(pathname: string, href: string): boolean {
 
 export function BottomNavigation() {
   const pathname = usePathname();
+  const { error, loading, selectedCareSpace } = useDb();
 
-  if (pathname === "/login" || pathname.startsWith("/auth/")) {
+  if (
+    pathname === "/login" ||
+    pathname.startsWith("/auth/") ||
+    (!selectedCareSpace && (loading || Boolean(error)))
+  ) {
     return null;
   }
 

@@ -494,6 +494,21 @@ export type Database = {
         Args: { p_care_space_id: string; p_medication_id: string };
         Returns: Medication;
       };
+      reclassify_medication_log: {
+        Args: {
+          p_care_space_id: string;
+          p_is_extra: boolean;
+          p_log_id: string;
+          p_note: string | null;
+          p_quantity: number | null;
+          p_schedule_id: string | null;
+          p_taken_at: string | null;
+          p_update_note: boolean;
+          p_update_quantity: boolean;
+          p_update_taken_at: boolean;
+        };
+        Returns: MedicationLog;
+      };
       upsert_daily_status: {
         Args: {
           p_breathing: string | null;

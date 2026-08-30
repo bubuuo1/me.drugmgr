@@ -76,6 +76,7 @@ export default function SettingsPage() {
   const online = useOnlineStatus();
   const {
     db,
+    selectedCareSpace,
     loading,
     error,
     refresh,
@@ -366,6 +367,15 @@ export default function SettingsPage() {
         <PageHeader title="환경설정" />
         <AccountSettingsCard />
         <LoadingState label="약 설정을 불러오는 중입니다." />
+      </main>
+    );
+  }
+
+  if (error && !selectedCareSpace) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader title="환경설정" />
+        <ErrorBanner message={error} onRetry={refresh} />
       </main>
     );
   }

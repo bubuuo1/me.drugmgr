@@ -115,6 +115,34 @@ async function finishPossibleDuplicateDialog(page: Page) {
   await expect(savedRegion).toBeVisible();
 }
 
+async function failFirstCareSpaceRead(page: Page) {
+  await page.addInitScript(() => {
+    const nativeStructuredClone = globalThis.structuredClone.bind(globalThis);
+    let shouldFail = true;
+
+    globalThis.structuredClone = ((value, options) => {
+      const isCareSpaceAccessList =
+        shouldFail &&
+        Array.isArray(value) &&
+        value.some(
+          (candidate) =>
+            typeof candidate === "object" &&
+            candidate !== null &&
+            "id" in candidate &&
+            candidate.id === "mock-care-space" &&
+            "role" in candidate
+        );
+
+      if (isCareSpaceAccessList) {
+        shouldFail = false;
+        throw new Error("기록을 불러오지 못했습니다. 다시 시도해 주세요.");
+      }
+
+      return nativeStructuredClone(value, options);
+    }) as typeof structuredClone;
+  });
+}
+
 test("홈에서 빠른 기록, 상태, 복용기록과 모바일 하단 메뉴가 보인다", async ({
   page,
 }) => {
@@ -156,6 +184,69 @@ test("홈에서 빠른 기록, 상태, 복용기록과 모바일 하단 메뉴�
   await expect(
     page.getByRole("navigation", { name: "가족 공간과 계정" })
   ).toHaveCount(0);
+});
+
+test("최초 가족 공간 조회가 실패하면 오류만 표시하고 공간 목록부터 다시 조회한다", async ({
+  page,
+}) => {
+  await failFirstCareSpaceRead(page);
+
+  const cases: Array<{
+    path: string;
+    forbidden: RegExp[];
+    recovered: () => Locator;
+  }> = [
+    {
+      path: "/records",
+      forbidden: [/이 날짜의 투약 기록이 없습니다/, /조회만 할 수 있습니다/],
+      recovered: () => page.locator("#record-date"),
+    },
+    {
+      path: "/settings",
+      forbidden: [/등록된 약이 없습니다/, /소유자와 보호자만 변경할 수 있습니다/],
+      recovered: () => page.getByRole("region", { name: "계정과 가족" }),
+    },
+    {
+      path: "/family",
+      forbidden: [/접근 가능한 가족 공간이 없습니다/],
+      recovered: () =>
+        page.getByRole("heading", {
+          level: 2,
+          name: "나의 복약 공간 구성원",
+          exact: true,
+        }),
+    },
+  ];
+
+  for (const scenario of cases) {
+    await page.goto(scenario.path);
+
+    const errorCard = page.getByRole("alert", { name: "오류" });
+    await expect(errorCard).toContainText(
+      "기록을 불러오지 못했습니다. 다시 시도해 주세요."
+    );
+    await expect(
+      page.getByRole("navigation", { name: "주요 메뉴" })
+    ).toHaveCount(0);
+    await expect(
+      errorCard.getByRole("button", { name: "다시 시도", exact: true })
+    ).toBeVisible();
+    await expect(
+      errorCard.getByRole("button", { name: "닫기", exact: true })
+    ).toHaveCount(0);
+    for (const forbidden of scenario.forbidden) {
+      await expect(page.getByText(forbidden)).toHaveCount(0);
+    }
+
+    await errorCard
+      .getByRole("button", { name: "다시 시도", exact: true })
+      .click();
+    await expect(errorCard).toHaveCount(0);
+    await expect(scenario.recovered()).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "주요 메뉴" })
+    ).toBeVisible();
+  }
 });
 
 test("주요 메뉴와 환경설정 하위 화면은 방문 기록을 불필요하게 쌓지 않는다", async ({

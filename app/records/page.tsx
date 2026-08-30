@@ -64,6 +64,7 @@ export default function RecordsPage() {
   const online = useOnlineStatus();
   const {
     db,
+    selectedCareSpace,
     loading,
     error,
     refresh,
@@ -232,6 +233,24 @@ export default function RecordsPage() {
     } finally {
       setPendingKey(null);
     }
+  }
+
+  if (loading && !selectedCareSpace) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader title="복용기록 확인" />
+        <LoadingState label="투약 기록을 불러오는 중입니다." />
+      </main>
+    );
+  }
+
+  if (error && !selectedCareSpace) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader title="복용기록 확인" />
+        <ErrorBanner message={error} onRetry={refresh} />
+      </main>
+    );
   }
 
   return (
