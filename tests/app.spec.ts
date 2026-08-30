@@ -1165,6 +1165,13 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(logItem).toContainText("1.25정");
   await expect(logItem).toContainText("13:21");
   await expect(logItem).toContainText("예정 " + keptScheduleTime);
+  await logItem.getByRole("button", { name: "수정", exact: true }).click();
+  await expect(
+    editForm.getByRole("combobox", { name: "일정 연결", exact: true })
+  ).toHaveValue(scheduleId!);
+  await logItem
+    .getByRole("button", { name: "수정 취소", exact: true })
+    .click();
   await logItem.getByRole("button", { name: "삭제", exact: true }).click();
 
   const logDeleteDialog = page.getByRole("dialog", {

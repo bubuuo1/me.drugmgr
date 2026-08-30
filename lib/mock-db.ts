@@ -166,10 +166,6 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function definedPatch<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined)
@@ -734,11 +730,26 @@ export class MockDbRepository implements DbRepository {
   ): Promise<MedicationLog> {
     const current = logById(careSpaceId, logId);
     const clean = definedPatch(patch);
-    const scheduleId = hasOwn(patch, "schedule_id")
+    const updatesClassification =
+      patch.schedule_id !== undefined || patch.is_extra !== undefined;
+    if (
+      updatesClassification &&
+      (patch.schedule_id === undefined || patch.is_extra === undefined)
+    ) {
+      throw new Error(
+        "투약 기록의 일정 연결과 추가 복용 분류는 함께 변경해야 합니다."
+      );
+    }
+    const scheduleId = patch.schedule_id !== undefined
       ? patch.schedule_id ?? null
       : current.schedule_id;
     const schedule = scheduleId ? scheduleById(careSpaceId, scheduleId) : null;
     const isExtra = patch.is_extra ?? current.is_extra;
+    if (updatesClassification && scheduleId === null && !isExtra) {
+      throw new Error(
+        "삭제된 일정의 과거 분류는 직접 만들 수 없습니다."
+      );
+    }
     if (schedule && isExtra) {
       throw new Error("일정에 연결된 기록은 추가 복용으로 표시할 수 없습니다.");
     }

@@ -210,10 +210,6 @@ function preferredCareSpace(
   );
 }
 
-function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function assertPatch(patch: object): void {
   if (!Object.values(patch).some((value) => value !== undefined)) {
     throw new Error("변경할 값을 입력해 주세요.");
@@ -952,26 +948,37 @@ export function DbProvider({ children }: PropsWithChildren) {
       const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const currentLog = db.medication_logs.find((log) => log.id === id);
-      const finalScheduleId = hasOwn(patch, "schedule_id")
+      const updatesSchedule = patch.schedule_id !== undefined;
+      if (!updatesSchedule && patch.is_extra !== undefined) {
+        throw new Error(
+          "투약 기록의 일정 연결과 추가 복용 분류는 함께 변경해야 합니다."
+        );
+      }
+      const finalScheduleId = updatesSchedule
         ? patch.schedule_id ?? null
         : currentLog?.schedule_id;
       const expectedExtra = finalScheduleId === null;
       if (patch.is_extra !== undefined && patch.is_extra !== expectedExtra) {
         throw new Error("schedule_id와 is_extra 값이 일치하지 않습니다.");
       }
-      const prepared: UpdateMedicationLogInput = {
-        ...patch,
-        schedule_id: hasOwn(patch, "schedule_id") ? patch.schedule_id ?? null : undefined,
-        is_extra:
-          hasOwn(patch, "schedule_id") && patch.is_extra === undefined
-            ? expectedExtra
-            : patch.is_extra,
-        quantity:
-          patch.quantity === undefined ? undefined : assertQuantity(patch.quantity),
-        note: hasOwn(patch, "note") ? normalizedNote(patch.note) : undefined,
-        taken_at:
-          patch.taken_at === undefined ? undefined : assertIsoDate(patch.taken_at),
-      };
+      const prepared = Object.fromEntries(
+        Object.entries({
+          ...patch,
+          schedule_id: updatesSchedule ? patch.schedule_id ?? null : undefined,
+          is_extra: updatesSchedule
+            ? patch.is_extra ?? expectedExtra
+            : undefined,
+          quantity:
+            patch.quantity === undefined
+              ? undefined
+              : assertQuantity(patch.quantity),
+          note: patch.note === undefined ? undefined : normalizedNote(patch.note),
+          taken_at:
+            patch.taken_at === undefined
+              ? undefined
+              : assertIsoDate(patch.taken_at),
+        }).filter(([, value]) => value !== undefined)
+      ) as UpdateMedicationLogInput;
       const row = await run(() => repository.updateLog(space.id, id, prepared));
       if (row.schedule_id && row.deleted_at === null) {
         await dismissScheduleNotifications(

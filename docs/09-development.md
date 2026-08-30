@@ -233,6 +233,7 @@ service role key는 사용하지 않는다. VAPID private key와 발송 비밀�
 | 약 `deleted_at` 직접 update가 연결 일정 비활성화 RPC를 우회함 | 직접 update 권한을 제거하고 호출 사용자·역할을 검사하는 원자적 soft-delete RPC만 허용한다. |
 | 상태 `date` 직접 update로 기록 날짜를 이동할 수 있음 | `date` update 권한을 제거하고 날짜별 제한 upsert RPC를 사용한다. |
 | 로그 `schedule_id`·`is_extra` 직접 update로 삭제 일정 전용 분류를 위조할 수 있음 | 두 분류 필드의 직접 update 권한을 제거하고, 호출 사용자·역할·로그·일정·약 관계를 검사하는 원자적 재분류 RPC만 허용한다. |
+| mock 일반 편집이 `schedule_id: undefined`를 일정 삭제로 해석해 E2E를 거짓 통과시킴 | store는 정의되지 않은 patch 필드를 제거하고, mock도 실제 분류 값이 함께 제공된 경우에만 재분류한다. 일반 편집 뒤 일정 연결 ID가 유지되는지 E2E로 확인한다. |
 | 탭·줄바꿈만 있는 상태 메모가 DB check를 통과함 | POSIX whitespace를 기준으로 비공백 문자가 하나 이상 있어야 하도록 검증 제약을 강화했다. |
 | Push 서버 액션이 Supabase 원문 오류를 반환할 수 있음 | 사용자 입력·인증·권한·설정·연결 오류를 제한된 문구로 매핑하고 원문은 반환하지 않는다. |
 | CSS 토큰 유일 정의 규칙과 manifest/viewport 리터럴이 충돌함 | CSS 변수를 읽지 못하는 플랫폼 메타데이터만 명시적 예외로 두고 manifest·viewport 값을 E2E로 고정한다. |
