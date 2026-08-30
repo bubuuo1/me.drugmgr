@@ -14,6 +14,7 @@ drop table if exists private.care_space_invite_email_sender_limits cascade;
 drop table if exists private.care_space_invite_email_limits cascade;
 drop table if exists private.family_relationship_accesses cascade;
 drop table if exists private.family_relationships cascade;
+drop table if exists public.medication_schedule_outcomes cascade;
 drop table if exists public.medication_logs cascade;
 drop table if exists public.daily_status cascade;
 drop table if exists public.medication_schedules cascade;
@@ -90,6 +91,7 @@ drop function if exists public.complete_push_delivery(
   text, uuid, smallint, boolean, integer, text, boolean
 ) cascade;
 drop function if exists public.set_medication_log_snapshot() cascade;
+drop function if exists public.set_medication_schedule_outcome_snapshot() cascade;
 drop function if exists public.set_updated_at() cascade;
 
 create extension if not exists "pgcrypto";
@@ -388,6 +390,70 @@ create index medication_schedules_active_time_idx
   on public.medication_schedules (time) where active;
 create index medication_schedules_care_space_active_time_idx
   on public.medication_schedules (care_space_id, time) where active;
+
+create table public.medication_schedule_outcomes (
+  id uuid primary key default gen_random_uuid(),
+  care_space_id uuid not null
+    constraint medication_schedule_outcomes_care_space_id_fkey
+    references public.care_spaces(id) on delete cascade,
+  client_request_id uuid not null,
+  medication_id uuid not null
+    constraint medication_schedule_outcomes_medication_id_fkey
+    references public.medications(id) on update restrict on delete restrict,
+  schedule_id uuid null
+    constraint medication_schedule_outcomes_schedule_id_fkey
+    references public.medication_schedules(id)
+    on update restrict on delete set null,
+  medication_name text not null,
+  medication_unit text not null,
+  schedule_time time(0) without time zone not null,
+  scheduled_date date not null,
+  outcome text not null,
+  note text null,
+  deleted_at timestamptz null,
+  created_by uuid null references auth.users(id) on delete set null,
+  updated_by uuid null references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint medication_schedule_outcomes_care_space_client_request_unique
+    unique (care_space_id, client_request_id),
+  constraint medication_schedule_outcomes_medication_care_space_fkey
+    foreign key (medication_id, care_space_id)
+    references public.medications(id, care_space_id)
+    on update restrict on delete restrict,
+  constraint medication_schedule_outcomes_schedule_care_space_fkey
+    foreign key (schedule_id, care_space_id)
+    references public.medication_schedules(id, care_space_id)
+    on update restrict on delete set null (schedule_id),
+  constraint medication_schedule_outcomes_name_snapshot_valid check (
+    char_length(medication_name) between 1 and 100
+  ),
+  constraint medication_schedule_outcomes_unit_snapshot_valid check (
+    char_length(medication_unit) <= 20
+  ),
+  constraint medication_schedule_outcomes_value_valid check (
+    outcome in ('not_taken', 'medication_unavailable')
+  ),
+  constraint medication_schedule_outcomes_note_valid check (
+    note is null or char_length(note) <= 2000
+  )
+);
+
+create unique index medication_schedule_outcomes_active_occurrence_unique
+  on public.medication_schedule_outcomes (
+    care_space_id,
+    schedule_id,
+    scheduled_date
+  )
+  where schedule_id is not null and deleted_at is null;
+create index medication_schedule_outcomes_active_date_idx
+  on public.medication_schedule_outcomes (care_space_id, scheduled_date, schedule_time)
+  where deleted_at is null;
+create index medication_schedule_outcomes_medication_care_space_idx
+  on public.medication_schedule_outcomes (medication_id, care_space_id);
+create index medication_schedule_outcomes_schedule_care_space_idx
+  on public.medication_schedule_outcomes (schedule_id, care_space_id)
+  where schedule_id is not null;
 
 create table public.medication_logs (
   id uuid primary key default gen_random_uuid(),
@@ -1076,6 +1142,72 @@ begin
 end;
 $$;
 
+create or replace function public.set_medication_schedule_outcome_snapshot()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  selected_medication_id uuid;
+  selected_medication_name text;
+  selected_medication_unit text;
+  selected_schedule_time time(0) without time zone;
+begin
+  if tg_op = 'INSERT' then
+    if new.schedule_id is null then
+      raise not_null_violation using message = 'schedule_id is required';
+    end if;
+
+    select
+      medication.id,
+      medication.name,
+      medication.unit,
+      schedule.time
+      into
+        selected_medication_id,
+        selected_medication_name,
+        selected_medication_unit,
+        selected_schedule_time
+      from public.medication_schedules as schedule
+      join public.medications as medication
+        on medication.id = schedule.medication_id
+        and medication.care_space_id = schedule.care_space_id
+      where schedule.id = new.schedule_id
+        and schedule.care_space_id = new.care_space_id
+        and medication.deleted_at is null;
+    if not found then
+      raise foreign_key_violation
+        using message = 'schedule_id does not belong to care_space_id';
+    end if;
+
+    new.medication_id := selected_medication_id;
+    new.medication_name := selected_medication_name;
+    new.medication_unit := selected_medication_unit;
+    new.schedule_time := selected_schedule_time;
+  else
+    if new.care_space_id is distinct from old.care_space_id then
+      raise check_violation using message = 'care_space_id cannot be changed';
+    end if;
+    if new.schedule_id is distinct from old.schedule_id
+      and new.schedule_id is not null
+    then
+      raise check_violation using message = 'schedule_id cannot be changed';
+    end if;
+
+    new.client_request_id := old.client_request_id;
+    new.medication_id := old.medication_id;
+    new.medication_name := old.medication_name;
+    new.medication_unit := old.medication_unit;
+    new.schedule_time := old.schedule_time;
+    new.scheduled_date := old.scheduled_date;
+    new.created_at := old.created_at;
+  end if;
+
+  return new;
+end;
+$$;
+
 create or replace function public.set_medication_log_snapshot()
 returns trigger
 language plpgsql
@@ -1189,6 +1321,15 @@ create trigger medication_schedules_set_audit_actor
 create trigger medication_schedules_set_updated_at
   before update on public.medication_schedules
   for each row execute function public.set_updated_at();
+create trigger medication_schedule_outcomes_set_audit_actor
+  before insert or update on public.medication_schedule_outcomes
+  for each row execute function private.set_audit_actor();
+create trigger medication_schedule_outcomes_set_snapshot
+  before insert or update on public.medication_schedule_outcomes
+  for each row execute function public.set_medication_schedule_outcome_snapshot();
+create trigger medication_schedule_outcomes_set_updated_at
+  before update on public.medication_schedule_outcomes
+  for each row execute function public.set_updated_at();
 create trigger medication_logs_set_audit_actor
   before insert or update on public.medication_logs
   for each row execute function private.set_audit_actor();
@@ -1284,6 +1425,8 @@ revoke all on function public.set_updated_at()
   from public, anon, authenticated;
 revoke all on function public.set_medication_log_snapshot()
   from public, anon, authenticated;
+revoke all on function public.set_medication_schedule_outcome_snapshot()
+  from public, anon, authenticated;
 revoke all on function private.is_care_space_member(uuid)
   from public, anon, authenticated;
 revoke all on function private.is_care_space_owner(uuid)
@@ -1313,6 +1456,7 @@ alter table public.care_space_members enable row level security;
 alter table public.care_space_invites enable row level security;
 alter table public.medications enable row level security;
 alter table public.medication_schedules enable row level security;
+alter table public.medication_schedule_outcomes enable row level security;
 alter table public.medication_logs enable row level security;
 alter table public.daily_status enable row level security;
 alter table private.care_space_invite_email_limits enable row level security;
@@ -1405,6 +1549,17 @@ create policy medication_schedules_manager_delete
   on public.medication_schedules for delete to authenticated
   using ((select private.can_manage_medication_settings(care_space_id)));
 
+create policy medication_schedule_outcomes_member_select
+  on public.medication_schedule_outcomes for select to authenticated
+  using ((select private.is_care_space_member(care_space_id)));
+create policy medication_schedule_outcomes_caregiver_insert
+  on public.medication_schedule_outcomes for insert to authenticated
+  with check ((select private.can_mutate_care_records(care_space_id)));
+create policy medication_schedule_outcomes_caregiver_update
+  on public.medication_schedule_outcomes for update to authenticated
+  using ((select private.can_mutate_care_records(care_space_id)))
+  with check ((select private.can_mutate_care_records(care_space_id)));
+
 create policy medication_logs_member_select
   on public.medication_logs for select to authenticated
   using ((select private.is_care_space_member(care_space_id)));
@@ -1436,6 +1591,7 @@ revoke all on table public.care_space_members from anon, authenticated;
 revoke all on table public.care_space_invites from anon, authenticated;
 revoke all on table public.medications from anon, authenticated;
 revoke all on table public.medication_schedules from anon, authenticated;
+revoke all on table public.medication_schedule_outcomes from anon, authenticated;
 revoke all on table public.medication_logs from anon, authenticated;
 revoke all on table public.daily_status from anon, authenticated;
 revoke all on table private.family_relationships
@@ -1477,6 +1633,18 @@ grant update (time, active)
   on table public.medication_schedules to authenticated;
 grant delete on table public.medication_schedules to authenticated;
 
+grant select on table public.medication_schedule_outcomes to authenticated;
+grant insert (
+  care_space_id,
+  client_request_id,
+  schedule_id,
+  scheduled_date,
+  outcome,
+  note
+) on table public.medication_schedule_outcomes to authenticated;
+grant update (outcome, note, deleted_at)
+  on table public.medication_schedule_outcomes to authenticated;
+
 grant select on table public.medication_logs to authenticated;
 grant insert (
   care_space_id,
@@ -1516,6 +1684,7 @@ grant all on table public.care_space_members to service_role;
 grant all on table public.care_space_invites to service_role;
 grant all on table public.medications to service_role;
 grant all on table public.medication_schedules to service_role;
+grant all on table public.medication_schedule_outcomes to service_role;
 grant all on table public.medication_logs to service_role;
 grant all on table public.daily_status to service_role;
 grant all on table private.care_space_invite_email_limits to service_role;
@@ -2515,6 +2684,15 @@ as $$
                 )::timestamp at time zone 'Asia/Seoul'
               )
         )
+        and not exists (
+          select 1
+            from public.medication_schedule_outcomes as outcome
+            where outcome.care_space_id = delivery.care_space_id
+              and outcome.schedule_id = delivery.schedule_id
+              and outcome.scheduled_date =
+                (delivery.scheduled_for at time zone 'Asia/Seoul')::date
+              and outcome.deleted_at is null
+        )
   );
 $$;
 
@@ -2605,7 +2783,16 @@ begin
   ),
   candidate_times as (
     select
-      base.*,
+      base.subscription_id,
+      base.care_space_id,
+      base.schedule_id,
+      base.medication_id,
+      base.medication_name,
+      base.schedule_time,
+      base.schedule_date,
+      base.lower_bound,
+      base.upper_bound,
+      base.day_ends_at,
       base.first_scheduled_for +
         floor(
           extract(epoch from (base.upper_bound - base.first_scheduled_for)) / 300
@@ -2629,6 +2816,14 @@ begin
                 candidate.schedule_date::timestamp at time zone 'Asia/Seoul'
               )
               and log.taken_at < candidate.day_ends_at
+        )
+        and not exists (
+          select 1
+            from public.medication_schedule_outcomes as outcome
+            where outcome.care_space_id = candidate.care_space_id
+              and outcome.schedule_id = candidate.schedule_id
+              and outcome.scheduled_date = candidate.schedule_date
+              and outcome.deleted_at is null
         )
   ),
   inserted as (
@@ -2740,6 +2935,11 @@ begin
     '투약 기록을 확인해 주세요.',
     '/log?med=' || schedule.medication_id::text ||
       '&schedule=' || schedule.id::text ||
+      '&date=' ||
+        to_char(
+          claimed.scheduled_for at time zone 'Asia/Seoul',
+          'YYYY-MM-DD'
+        ) ||
       '&space=' || claimed.care_space_id::text,
     'schedule-' || replace(schedule.id::text, '-', '') || '-' ||
       to_char(claimed.scheduled_for at time zone 'Asia/Seoul', 'YYYYMMDD')
@@ -2808,7 +3008,13 @@ begin
       for update
   ),
   valid_delivery as (
-    select locked.*
+    select
+      locked.id,
+      locked.subscription_id,
+      locked.care_space_id,
+      locked.schedule_id,
+      locked.scheduled_for,
+      locked.attempt_count
       from locked_delivery as locked
       where private.push_delivery_is_sendable(locked.id, p_now)
   ),
@@ -2833,6 +3039,11 @@ begin
     '투약 기록을 확인해 주세요.',
     '/log?med=' || schedule.medication_id::text ||
       '&schedule=' || schedule.id::text ||
+      '&date=' ||
+        to_char(
+          valid.scheduled_for at time zone 'Asia/Seoul',
+          'YYYY-MM-DD'
+        ) ||
       '&space=' || valid.care_space_id::text,
     'schedule-' || replace(schedule.id::text, '-', '') || '-' ||
       to_char(valid.scheduled_for at time zone 'Asia/Seoul', 'YYYYMMDD')

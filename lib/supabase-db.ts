@@ -1,4 +1,8 @@
-import type { DbRepository, RequiredAddMedicationLogInput } from "@/lib/db-repository";
+import type {
+  DbRepository,
+  RequiredAddMedicationLogInput,
+  RequiredAddMedicationScheduleOutcomeInput,
+} from "@/lib/db-repository";
 import { requireSupabase } from "@/lib/supabase";
 import type {
   AddMedicationInput,
@@ -16,6 +20,7 @@ import type {
   Medication,
   MedicationLog,
   MedicationSchedule,
+  MedicationScheduleOutcome,
   PendingCareSpaceInvite,
   UpdateMedicationInput,
   UpdateMedicationLogInput,
@@ -111,6 +116,12 @@ function normalizeLog(row: MedicationLog): MedicationLog {
   };
 }
 
+function normalizeScheduleOutcome(
+  row: MedicationScheduleOutcome
+): MedicationScheduleOutcome {
+  return { ...row, schedule_time: withoutSeconds(row.schedule_time) };
+}
+
 function normalizedNullableText(value: string | null): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed || null;
@@ -137,6 +148,30 @@ function existingLogForRequest(
   if (isSameLogRequest(row, input)) return normalizeLog(row);
   throw new Error(
     "같은 요청 ID로 이미 다른 내용의 투약 기록이 저장되어 있습니다. 기록을 새로고침한 뒤 다시 시도해 주세요."
+  );
+}
+
+function isSameScheduleOutcomeRequest(
+  row: MedicationScheduleOutcome,
+  input: RequiredAddMedicationScheduleOutcomeInput
+): boolean {
+  return (
+    row.schedule_id === input.schedule_id &&
+    row.scheduled_date === input.scheduled_date &&
+    row.outcome === input.outcome &&
+    normalizedNullableText(row.note) === normalizedNullableText(input.note)
+  );
+}
+
+function existingScheduleOutcomeForRequest(
+  row: MedicationScheduleOutcome,
+  input: RequiredAddMedicationScheduleOutcomeInput
+): MedicationScheduleOutcome {
+  if (isSameScheduleOutcomeRequest(row, input)) {
+    return normalizeScheduleOutcome(row);
+  }
+  throw new Error(
+    "같은 요청 ID로 이미 다른 내용의 일정 결과가 저장되어 있습니다. 기록을 새로고침한 뒤 다시 시도해 주세요."
   );
 }
 
@@ -310,7 +345,7 @@ export class SupabaseDbRepository implements DbRepository {
 
   async fetchAll(careSpaceId: string): Promise<DB> {
     const client = requireSupabase();
-    const [medications, schedules, logs, statuses] = await Promise.all([
+    const [medications, schedules, outcomes, logs, statuses] = await Promise.all([
       client
         .from("medications")
         .select("*")
@@ -322,6 +357,13 @@ export class SupabaseDbRepository implements DbRepository {
         .select("*")
         .eq("care_space_id", careSpaceId)
         .order("time", { ascending: true }),
+      client
+        .from("medication_schedule_outcomes")
+        .select("*")
+        .eq("care_space_id", careSpaceId)
+        .is("deleted_at", null)
+        .order("scheduled_date", { ascending: true })
+        .order("schedule_time", { ascending: true }),
       client
         .from("medication_logs")
         .select("*")
@@ -337,6 +379,7 @@ export class SupabaseDbRepository implements DbRepository {
 
     if (medications.error) throw failure("약 목록 조회", medications.error);
     if (schedules.error) throw failure("복용 일정 조회", schedules.error);
+    if (outcomes.error) throw failure("일정 결과 조회", outcomes.error);
     if (logs.error) throw failure("투약 기록 조회", logs.error);
     if (statuses.error) throw failure("상태 기록 조회", statuses.error);
 
@@ -349,6 +392,7 @@ export class SupabaseDbRepository implements DbRepository {
       medication_schedules: schedules.data
         .filter((schedule) => visibleMedicationIds.has(schedule.medication_id))
         .map(normalizeSchedule),
+      medication_schedule_outcomes: outcomes.data.map(normalizeScheduleOutcome),
       medication_logs: logs.data.map(normalizeLog),
       daily_status: statuses.data,
     };
@@ -455,6 +499,50 @@ export class SupabaseDbRepository implements DbRepository {
       .single();
     if (error) throw failure("복용 일정 삭제", error);
     return normalizeSchedule(data);
+  }
+
+  async addScheduleOutcome(
+    careSpaceId: string,
+    input: RequiredAddMedicationScheduleOutcomeInput
+  ): Promise<MedicationScheduleOutcome> {
+    const client = requireSupabase();
+    const existingBeforeInsert = await client
+      .from("medication_schedule_outcomes")
+      .select("*")
+      .eq("care_space_id", careSpaceId)
+      .eq("client_request_id", input.client_request_id)
+      .maybeSingle();
+    if (existingBeforeInsert.error) {
+      throw failure("일정 결과 중복 확인", existingBeforeInsert.error);
+    }
+    if (existingBeforeInsert.data) {
+      return existingScheduleOutcomeForRequest(existingBeforeInsert.data, input);
+    }
+
+    const inserted = await client
+      .from("medication_schedule_outcomes")
+      .insert({ ...input, care_space_id: careSpaceId })
+      .select()
+      .single();
+
+    if (!inserted.error) return normalizeScheduleOutcome(inserted.data);
+
+    if (inserted.error.code === "23505") {
+      const existing = await client
+        .from("medication_schedule_outcomes")
+        .select("*")
+        .eq("care_space_id", careSpaceId)
+        .eq("client_request_id", input.client_request_id)
+        .maybeSingle();
+      if (existing.error) {
+        throw failure("일정 결과 중복 확인", existing.error);
+      }
+      if (existing.data) {
+        return existingScheduleOutcomeForRequest(existing.data, input);
+      }
+    }
+
+    throw failure("일정 결과 저장", inserted.error);
   }
 
   async addLog(

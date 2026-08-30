@@ -40,6 +40,13 @@ export default function Home() {
         .sort((a, b) => a.taken_at.localeCompare(b.taken_at)),
     [db.medication_logs, today]
   );
+  const todayScheduleOutcomes = useMemo(
+    () =>
+      db.medication_schedule_outcomes.filter(
+        (outcome) => outcome.scheduled_date === today
+      ),
+    [db.medication_schedule_outcomes, today]
+  );
   const latestLogByMedication = useMemo(() => {
     const result = new Map<string, MedicationLog>();
     for (const log of db.medication_logs) {
@@ -65,11 +72,13 @@ export default function Home() {
   const recordedScheduleIds = useMemo(
     () =>
       new Set(
-        todayLogs
-          .map((log) => log.schedule_id)
+        [
+          ...todayLogs.map((log) => log.schedule_id),
+          ...todayScheduleOutcomes.map((outcome) => outcome.schedule_id),
+        ]
           .filter((scheduleId): scheduleId is string => scheduleId !== null)
       ),
-    [todayLogs]
+    [todayLogs, todayScheduleOutcomes]
   );
   const recordedScheduleCount = todaySchedules.filter((schedule) =>
     recordedScheduleIds.has(schedule.id)
@@ -151,6 +160,9 @@ export default function Home() {
               const log = todayLogs.find(
                 (candidate) => candidate.schedule_id === schedule.id
               );
+              const outcome = todayScheduleOutcomes.find(
+                (candidate) => candidate.schedule_id === schedule.id
+              );
               return (
                 <li key={schedule.id}>
                   {log ? (
@@ -165,9 +177,24 @@ export default function Home() {
                       </div>
                       <span className="font-bold text-success">기록 있음</span>
                     </div>
+                  ) : outcome ? (
+                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3">
+                      <div>
+                        <p className="text-lg font-bold text-ink">
+                          {schedule.time} · {medication.name}
+                        </p>
+                        <p className="text-base text-body">
+                          일정 결과{" "}
+                          {outcome.outcome === "not_taken"
+                            ? "복용하지 않음"
+                            : "약 없음"}
+                        </p>
+                      </div>
+                      <span className="font-bold text-body">기록 완료</span>
+                    </div>
                   ) : canWriteRecords ? (
                     <Link
-                      href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}`}
+                      href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}&date=${today}`}
                       className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 active:bg-surface-soft"
                     >
                       <div>
@@ -239,7 +266,7 @@ export default function Home() {
               (schedule) => !recordedScheduleIds.has(schedule.id)
             );
             const href = nextSchedule
-              ? `/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(nextSchedule.id)}`
+              ? `/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(nextSchedule.id)}&date=${today}`
               : `/log?med=${encodeURIComponent(medication.id)}&extra=1`;
             const booleanOnly = isBooleanOnly(medication);
 

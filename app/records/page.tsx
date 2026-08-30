@@ -38,6 +38,12 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "기록을 처리하지 못했습니다.";
 }
 
+function scheduleOutcomeLabel(
+  outcome: "not_taken" | "medication_unavailable"
+): string {
+  return outcome === "not_taken" ? "복용하지 않음" : "약 없음";
+}
+
 function statusLabel(
   key: "fatigue" | "strength" | "breathing" | "eye",
   value: string
@@ -99,6 +105,33 @@ export default function RecordsPage() {
         )
         .sort((a, b) => a.taken_at.localeCompare(b.taken_at)),
     [dateKey, db.medication_logs]
+  );
+  const dayScheduleOutcomes = useMemo(
+    () =>
+      db.medication_schedule_outcomes
+        .filter((outcome) => outcome.scheduled_date === dateKey)
+        .sort((a, b) => a.schedule_time.localeCompare(b.schedule_time)),
+    [dateKey, db.medication_schedule_outcomes]
+  );
+  const timelineItems = useMemo(
+    () =>
+      [
+        ...dayLogs.map((log) => ({
+          id: log.id,
+          kind: "log" as const,
+          time: formatKstDateTimeInput(log.taken_at).slice(11, 16),
+          log,
+        })),
+        ...dayScheduleOutcomes.map((outcome) => ({
+          id: outcome.id,
+          kind: "outcome" as const,
+          time: outcome.schedule_time,
+          outcome,
+        })),
+      ].sort(
+        (a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id)
+      ),
+    [dayLogs, dayScheduleOutcomes]
   );
   const status = db.daily_status.find((candidate) => candidate.date === dateKey);
   const totals = useMemo(() => {
@@ -321,11 +354,11 @@ export default function RecordsPage() {
                 투약 타임라인
               </h2>
               <span className="text-base font-semibold text-body">
-                {dayLogs.length}건
+                {timelineItems.length}건
               </span>
             </div>
 
-            {dayLogs.length === 0 ? (
+            {timelineItems.length === 0 ? (
               <div className="rounded-2xl border border-hairline px-5 py-6 text-center">
                 <p className="text-lg font-bold text-ink">
                   이 날짜의 투약 기록이 없습니다.
@@ -341,7 +374,42 @@ export default function RecordsPage() {
               </div>
             ) : (
               <ol className="flex flex-col gap-4">
-                {dayLogs.map((log) => {
+                {timelineItems.map((item) => {
+                  if (item.kind === "outcome") {
+                    const outcome = item.outcome;
+                    return (
+                      <li
+                        key={outcome.id}
+                        className="rounded-2xl border border-hairline px-5 py-5"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-2xl font-bold text-ink">
+                              {outcome.schedule_time}
+                            </p>
+                            <h3 className="mt-1 text-xl font-bold text-ink">
+                              {outcome.medication_name}
+                            </h3>
+                            <p className="mt-1 text-lg text-body">
+                              {scheduleOutcomeLabel(outcome.outcome)}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-surface-soft px-3 py-1 text-sm font-bold text-body">
+                            일정 결과
+                          </span>
+                        </div>
+
+                        {outcome.note && (
+                          <p className="mt-4 rounded-xl bg-surface-soft px-4 py-3 text-base leading-relaxed text-body">
+                            <span className="font-bold text-ink">메모: </span>
+                            {outcome.note}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  }
+
+                  const log = item.log;
                   const editing = editId === log.id;
                   const booleanOnly = log.medication_unit === "";
                   const schedules = db.medication_schedules

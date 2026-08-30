@@ -11,6 +11,11 @@ const preservedScheduleEditNote = "삭제 일정 분류 보존 " + runSuffix;
 const statusNote = "상태 기록 " + runSuffix;
 const firstDuplicateNote = "첫 중복 검사 기록 " + runSuffix;
 const secondDuplicateNote = "중복 확인 기록 " + runSuffix;
+const outcomeMedicationName = "E2E일정결과-" + runSuffix;
+const notTakenScheduleTime = "07:13";
+const unavailableScheduleTime = "07:14";
+const notTakenNote = "사용자가 복용하지 않음 선택 " + runSuffix;
+const unavailableNote = "사용자가 약 없음 선택 " + runSuffix;
 
 const browserErrors = new WeakMap<Page, string[]>();
 
@@ -527,7 +532,9 @@ test("보호자는 가족 구성원을 확인하고 약과 임의 시각을 설�
     .locator("main header")
     .getByRole("link", { name: "환경설정으로 이동", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(
+    /\/settings\?space=mock-second-care-space$/
+  );
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
 
   await page.getByRole("button", { name: "새 약 추가", exact: true }).click();
@@ -598,10 +605,12 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
     exact: true,
   });
   await spaceSelect.selectOption("mock-second-care-space");
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(
+    /\/settings\?space=mock-second-care-space$/
+  );
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
   await page.getByRole("link", { name: "복용관리", exact: true }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/\?space=mock-second-care-space$/);
   const emptyMedicationMessage = page.getByText("활성화된 약이 없습니다.");
   await expect(emptyMedicationMessage).toBeVisible();
   await expect(emptyMedicationMessage.locator("..")).toHaveClass(/items-center/);
@@ -624,7 +633,7 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
   );
 });
 
-test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 기록을 우선한다", async ({
+test("URL 없는 최초 진입은 소유자가 기본이고 가족 기록 대상은 이동과 새로고침에서 유지된다", async ({
   page,
 }) => {
   await page.goto("/settings");
@@ -632,18 +641,44 @@ test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 
     name: "기록 대상",
     exact: true,
   });
+  await expect(spaceSelect).toHaveValue("mock-care-space");
+
   await spaceSelect.selectOption("mock-second-care-space");
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
+  await expect(page).toHaveURL(
+    /\/settings\?space=mock-second-care-space$/
+  );
+
+  await page.getByRole("link", { name: "복용기록", exact: true }).click();
+  await expect(page).toHaveURL(
+    /\/records\?space=mock-second-care-space$/
+  );
+  await expect(page.getByRole("complementary", { name: "현재 기록 대상" }))
+    .toContainText("두 번째 복약 공간 · 보호자");
+  const familyRecord = page
+    .getByRole("listitem")
+    .filter({ hasText: "가족 공간 새로고침 확인 기록" });
+  await expect(familyRecord).toContainText("가족 새로고침 확인약");
 
   await page.reload();
-  await expect(
-    page.getByRole("combobox", { name: "기록 대상", exact: true })
-  ).toHaveValue("mock-care-space");
+  await expect(page).toHaveURL(
+    /\/records\?space=mock-second-care-space$/
+  );
+  await expect(page.getByRole("complementary", { name: "현재 기록 대상" }))
+    .toContainText("두 번째 복약 공간 · 보호자");
+  await expect(familyRecord).toContainText("가족 새로고침 확인약");
+  await expect(familyRecord).toContainText("가족 공간 새로고침 확인 기록");
 
   await page.goto("/?space=mock-second-care-space");
   await expect(page.getByRole("complementary", { name: "현재 기록 대상" }))
     .toContainText("두 번째 복약 공간 · 보호자");
   await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
+
+  await page.goto("/settings?space=not-accessible");
+  await expect(
+    page.getByRole("combobox", { name: "기록 대상", exact: true })
+  ).toHaveValue("mock-care-space");
+  await expect(page).toHaveURL(/\/settings$/);
 });
 
 test("320px·375px·393px 모바일 화면에서 주요 화면과 날짜·시간 선택기가 한 화면에 맞는다", async ({
@@ -900,6 +935,211 @@ test("분류가 없거나 무효인 일정 링크를 추가 복용으로 자동 
   await expect(
     page.getByRole("heading", { level: 2, name: "추가 복용 기록" })
   ).toBeVisible();
+});
+
+test("일정의 복용하지 않음과 약 없음을 실제 복용과 분리해 기록한다", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "새 약 추가", exact: true }).click();
+  const medicationForm = page.getByRole("group", { name: "새 약" });
+  await medicationForm
+    .getByLabel("약 이름", { exact: true })
+    .fill(outcomeMedicationName);
+  await medicationForm.getByLabel("단위", { exact: true }).fill("정");
+  await medicationForm
+    .getByRole("textbox", { name: /^빠른 수량 선택지/ })
+    .fill("1");
+  await medicationForm
+    .getByRole("button", { name: "약 설정 저장", exact: true })
+    .click();
+
+  const settingsCard = page.getByRole("article").filter({
+    has: page.getByRole("heading", {
+      level: 3,
+      name: outcomeMedicationName,
+      exact: true,
+    }),
+  });
+  await settingsCard
+    .getByRole("button", {
+      name: outcomeMedicationName + " 알림 시간 추가",
+      exact: true,
+    })
+    .click();
+  const scheduleForm = settingsCard.getByRole("group", {
+    name: outcomeMedicationName + " 새 복용·알림 시간 입력",
+  });
+  const scheduleTimeTrigger = scheduleForm.getByRole("button", {
+    name: /^예정 시각, 현재/,
+  });
+  await selectTime(page, scheduleTimeTrigger, notTakenScheduleTime);
+  await scheduleForm
+    .getByRole("button", { name: "이 시간 추가", exact: true })
+    .click();
+  await selectTime(page, scheduleTimeTrigger, unavailableScheduleTime);
+  await scheduleForm
+    .getByRole("button", { name: "이 시간 추가", exact: true })
+    .click();
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "복용관리", exact: true })
+    .click();
+  const medicationCard = page.getByRole("article").filter({
+    has: page.getByRole("heading", {
+      level: 2,
+      name: outcomeMedicationName,
+      exact: true,
+    }),
+  });
+  await expect(medicationCard).toContainText("마지막 복용 기록 없음");
+  await expect(medicationCard).toContainText("오늘 합계 0정");
+
+  const scheduleSection = page.getByRole("region", { name: "오늘 예정" });
+  let notTakenRow = scheduleSection
+    .getByRole("listitem")
+    .filter({ hasText: notTakenScheduleTime + " · " + outcomeMedicationName });
+  await notTakenRow.getByRole("link").click();
+
+  let resultGroup = page.getByRole("group", {
+    name: "일정 결과",
+    exact: true,
+  });
+  await expect(
+    resultGroup.getByRole("button", { name: "복용함", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  await resultGroup
+    .getByRole("button", { name: "복용하지 않음", exact: true })
+    .click();
+  await expect(
+    resultGroup.getByRole("button", {
+      name: "복용하지 않음",
+      exact: true,
+    })
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("group", { name: "몇 정 드셨나요?", exact: true })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^실제 복용 날짜, 현재/ })
+  ).toHaveCount(0);
+  await page.getByLabel("메모 (선택)", { exact: true }).fill(notTakenNote);
+  await page
+    .getByRole("button", { name: "일정 결과 저장", exact: true })
+    .click();
+  await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
+    "복용하지 않음"
+  );
+  await page.getByRole("link", { name: "첫 화면으로", exact: true }).click();
+
+  notTakenRow = scheduleSection
+    .getByRole("listitem")
+    .filter({ hasText: notTakenScheduleTime + " · " + outcomeMedicationName });
+  await expect(notTakenRow).toContainText("일정 결과 복용하지 않음");
+  await expect(notTakenRow).toContainText("기록 완료");
+  await expect(medicationCard).toContainText("마지막 복용 기록 없음");
+  await expect(medicationCard).toContainText("오늘 합계 0정");
+
+  let unavailableRow = scheduleSection
+    .getByRole("listitem")
+    .filter({ hasText: unavailableScheduleTime + " · " + outcomeMedicationName });
+  await unavailableRow.getByRole("link").click();
+  resultGroup = page.getByRole("group", {
+    name: "일정 결과",
+    exact: true,
+  });
+  await resultGroup
+    .getByRole("button", { name: "약 없음", exact: true })
+    .click();
+  await expect(
+    resultGroup.getByRole("button", { name: "약 없음", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("메모 (선택)", { exact: true }).fill(unavailableNote);
+  await page
+    .getByRole("button", { name: "일정 결과 저장", exact: true })
+    .click();
+  await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
+    "약 없음"
+  );
+  await page.getByRole("link", { name: "첫 화면으로", exact: true }).click();
+
+  unavailableRow = scheduleSection
+    .getByRole("listitem")
+    .filter({ hasText: unavailableScheduleTime + " · " + outcomeMedicationName });
+  await expect(unavailableRow).toContainText("일정 결과 약 없음");
+  await expect(unavailableRow).toContainText("기록 완료");
+  await expect(medicationCard).toContainText("마지막 복용 기록 없음");
+  await expect(medicationCard).toContainText("오늘 합계 0정");
+
+  await page
+    .getByRole("link", { name: "복용기록 확인", exact: true })
+    .click();
+  let timeline = page.getByRole("region", { name: "투약 타임라인" });
+  const notTakenItem = timeline
+    .getByRole("listitem")
+    .filter({ hasText: notTakenNote });
+  await expect(notTakenItem).toContainText(notTakenScheduleTime);
+  await expect(notTakenItem).toContainText(outcomeMedicationName);
+  await expect(notTakenItem).toContainText("복용하지 않음");
+  const unavailableItem = timeline
+    .getByRole("listitem")
+    .filter({ hasText: unavailableNote });
+  await expect(unavailableItem).toContainText(unavailableScheduleTime);
+  await expect(unavailableItem).toContainText(outcomeMedicationName);
+  await expect(unavailableItem).toContainText("약 없음");
+  let totalsSection = page.locator("section").filter({
+    has: page.getByRole("heading", {
+      level: 2,
+      name: "이 날짜의 총 기록",
+      exact: true,
+    }),
+  });
+  await expect(
+    totalsSection.getByText(outcomeMedicationName, { exact: true })
+  ).toHaveCount(0);
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "복용관리", exact: true })
+    .click();
+  await medicationCard
+    .getByRole("link", { name: "추가 복용 기록", exact: true })
+    .click();
+  await expect(
+    page.getByRole("group", { name: "일정 결과", exact: true })
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "1정", exact: true }).click();
+  await page.getByRole("button", { name: "기록 저장", exact: true }).click();
+  await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
+    outcomeMedicationName + " 1정"
+  );
+  await page.getByRole("link", { name: "첫 화면으로", exact: true }).click();
+
+  await expect(medicationCard).toContainText(
+    /마지막 복용 오늘 \d{2}:\d{2} · 1정/
+  );
+  await expect(medicationCard).toContainText("오늘 합계 1정");
+  await page
+    .getByRole("link", { name: "복용기록 확인", exact: true })
+    .click();
+  timeline = page.getByRole("region", { name: "투약 타임라인" });
+  const actualLogItem = timeline
+    .getByRole("listitem")
+    .filter({ hasText: outcomeMedicationName })
+    .filter({ hasText: "추가 기록" });
+  await expect(actualLogItem).toContainText("1정");
+  totalsSection = page.locator("section").filter({
+    has: page.getByRole("heading", {
+      level: 2,
+      name: "이 날짜의 총 기록",
+      exact: true,
+    }),
+  });
+  const actualTotal = totalsSection
+    .getByRole("listitem")
+    .filter({ hasText: outcomeMedicationName });
+  await expect(actualTotal).toContainText("합계 1정");
 });
 
 test("이전 날짜의 약별 마지막 복용은 날짜와 시각·수량을 함께 표시한다", async ({

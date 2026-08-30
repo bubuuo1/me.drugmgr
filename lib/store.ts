@@ -3,6 +3,8 @@
 import {
   createContext,
   createElement,
+  Fragment,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -11,6 +13,7 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { DbRepository } from "@/lib/db-repository";
 import { fromDateKey, toDateKey } from "@/lib/date";
 import { MockDbRepository } from "@/lib/mock-db";
@@ -20,6 +23,7 @@ import { SupabaseDbRepository } from "@/lib/supabase-db";
 import type {
   AddMedicationInput,
   AddMedicationLogInput,
+  AddMedicationScheduleOutcomeInput,
   AddScheduleInput,
   CareSpaceAccess,
   CareSpaceInvite,
@@ -32,6 +36,7 @@ import type {
   Medication,
   MedicationLog,
   MedicationSchedule,
+  MedicationScheduleOutcome,
   PendingCareSpaceInvite,
   UpdateMedicationInput,
   UpdateMedicationLogInput,
@@ -41,6 +46,7 @@ import type {
 const EMPTY_DB: DB = {
   medications: [],
   medication_schedules: [],
+  medication_schedule_outcomes: [],
   medication_logs: [],
   daily_status: [],
 };
@@ -276,6 +282,96 @@ function preferredCareSpace(
   );
 }
 
+function replaceCareSpaceInCurrentUrl(spaceId: string | null): void {
+  if (typeof globalThis.location === "undefined") return;
+
+  const url = new URL(globalThis.location.href);
+  if (spaceId) url.searchParams.set("space", spaceId);
+  else url.searchParams.delete("space");
+
+  const nextPath = `${url.pathname}${url.search}${url.hash}`;
+  const currentPath = `${globalThis.location.pathname}${globalThis.location.search}${globalThis.location.hash}`;
+  if (nextPath === currentPath) return;
+
+  globalThis.history.replaceState(null, "", nextPath);
+}
+
+type CareSpaceUrlSyncProps = {
+  careSpaces: CareSpaceAccess[];
+  initialized: boolean;
+  selectedCareSpace: CareSpaceAccess | null;
+  selectCareSpace(id: string): Promise<void>;
+};
+
+function CareSpaceUrlSync({
+  careSpaces,
+  initialized,
+  selectedCareSpace,
+  selectCareSpace,
+}: CareSpaceUrlSyncProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const selectionInFlight = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !initialized ||
+      !selectedCareSpace ||
+      pathname === "/login" ||
+      pathname.startsWith("/auth/")
+    ) {
+      return;
+    }
+
+    const defaultSpace = preferredCareSpace(careSpaces, null);
+    const requestedId = searchParams.get("space");
+    if (requestedId === null) {
+      selectionInFlight.current = null;
+      replaceCareSpaceInCurrentUrl(
+        selectedCareSpace.id === defaultSpace?.id
+          ? null
+          : selectedCareSpace.id
+      );
+      return;
+    }
+
+    const requestedSpace = careSpaces.find(
+      (space) => space.id === requestedId
+    );
+    const nextSpace = requestedSpace ?? defaultSpace;
+    if (!nextSpace) return;
+
+    if (nextSpace.id !== selectedCareSpace.id) {
+      if (selectionInFlight.current === nextSpace.id) return;
+      selectionInFlight.current = nextSpace.id;
+      void selectCareSpace(nextSpace.id)
+        .catch(() => undefined)
+        .finally(() => {
+          if (selectionInFlight.current === nextSpace.id) {
+            selectionInFlight.current = null;
+          }
+        });
+      return;
+    }
+
+    selectionInFlight.current = null;
+    if (!requestedSpace) {
+      replaceCareSpaceInCurrentUrl(
+        nextSpace.id === defaultSpace?.id ? null : nextSpace.id
+      );
+    }
+  }, [
+    careSpaces,
+    initialized,
+    pathname,
+    searchParams,
+    selectCareSpace,
+    selectedCareSpace,
+  ]);
+
+  return null;
+}
+
 function assertPatch(patch: object): void {
   if (!Object.values(patch).some((value) => value !== undefined)) {
     throw new Error("변경할 값을 입력해 주세요.");
@@ -362,6 +458,9 @@ export type DbContextValue = {
   addSchedule(input: AddScheduleInput): Promise<MedicationSchedule>;
   updateSchedule(id: string, patch: UpdateScheduleInput): Promise<MedicationSchedule>;
   deleteSchedule(id: string): Promise<MedicationSchedule>;
+  addScheduleOutcome(
+    input: AddMedicationScheduleOutcomeInput
+  ): Promise<MedicationScheduleOutcome>;
   addLog(input: AddMedicationLogInput): Promise<MedicationLog>;
   updateLog(id: string, patch: UpdateMedicationLogInput): Promise<MedicationLog>;
   deleteLog(id: string): Promise<MedicationLog>;
@@ -507,6 +606,9 @@ export function DbProvider({ children }: PropsWithChildren) {
       dataRequests.select(space.id);
       setSelectedCareSpaceId(space.id);
       setDb(EMPTY_DB);
+      replaceCareSpaceInCurrentUrl(
+        space.id === preferredCareSpace(careSpaces, null)?.id ? null : space.id
+      );
 
       const next = await run(() => repository.fetchAll(space.id));
       if (!dataRequests.isCurrent(requestGeneration)) return;
@@ -1184,6 +1286,52 @@ export function DbProvider({ children }: PropsWithChildren) {
     [dataRequests, requireMedicationManagerSpace, run]
   );
 
+  const addScheduleOutcome = useCallback(
+    async (input: AddMedicationScheduleOutcomeInput) => {
+      const space = requireWritableSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
+      const schedule = db.medication_schedules.find(
+        (candidate) => candidate.id === input.schedule_id
+      );
+      if (!schedule) {
+        throw new Error("기록할 복용 일정을 찾을 수 없습니다.");
+      }
+      fromDateKey(input.scheduled_date);
+      if (
+        input.outcome !== "not_taken" &&
+        input.outcome !== "medication_unavailable"
+      ) {
+        throw new Error("유효한 일정 결과를 선택해 주세요.");
+      }
+      const clientRequestId = input.client_request_id ?? requestId();
+      if (!UUID_PATTERN.test(clientRequestId)) {
+        throw new Error("client_request_id는 UUID 형식이어야 합니다.");
+      }
+      const prepared = {
+        schedule_id: schedule.id,
+        scheduled_date: input.scheduled_date,
+        outcome: input.outcome,
+        note: normalizedNote(input.note),
+        client_request_id: clientRequestId,
+      };
+      const row = await run(() =>
+        repository.addScheduleOutcome(space.id, prepared)
+      );
+      await dismissScheduleNotifications(schedule.id, row.scheduled_date);
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setDb((current) => ({
+          ...current,
+          medication_schedule_outcomes: replaceRow(
+            current.medication_schedule_outcomes,
+            row
+          ),
+        }));
+      }
+      return row;
+    },
+    [dataRequests, db.medication_schedules, requireWritableSpace, run]
+  );
+
   const addLog = useCallback(
     async (input: AddMedicationLogInput) => {
       const space = requireWritableSpace();
@@ -1396,6 +1544,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       addSchedule,
       updateSchedule,
       deleteSchedule,
+      addScheduleOutcome,
       addLog,
       updateLog,
       deleteLog: softDeleteLog,
@@ -1439,6 +1588,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       addSchedule,
       updateSchedule,
       deleteSchedule,
+      addScheduleOutcome,
       addLog,
       updateLog,
       softDeleteLog,
@@ -1461,7 +1611,21 @@ export function DbProvider({ children }: PropsWithChildren) {
           },
           "개인 기록을 지우고 안전하게 로그아웃하고 있습니다."
         )
-      : children
+      : createElement(
+          Fragment,
+          null,
+          createElement(
+            Suspense,
+            { fallback: null },
+            createElement(CareSpaceUrlSync, {
+              careSpaces,
+              initialized,
+              selectedCareSpace,
+              selectCareSpace,
+            })
+          ),
+          children
+        )
   );
 }
 

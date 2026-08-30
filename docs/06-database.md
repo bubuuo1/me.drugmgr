@@ -18,6 +18,7 @@
 - `care_space_invites`
 - `medications`
 - `medication_schedules`
+- `medication_schedule_outcomes`
 - `medication_logs`
 - `daily_status`
 
@@ -103,7 +104,34 @@
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 수정 시각 |
 
-한 공간의 한 약에 서로 다른 예정 시각을 여러 개 저장할 수 있고, 같은 약에 같은 예정 시각만 중복 생성하지 않는다. `medication_id + care_space_id` 복합 FK가 다른 공간의 약 연결을 막는다. 일정은 알림 시각만 관리하며 실제 수량은 투약 로그에 저장한다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정하거나 삭제해도 기존 로그의 `schedule_time` 스냅샷은 변경하지 않는다.
+한 공간의 한 약에 서로 다른 예정 시각을 여러 개 저장할 수 있고, 같은 약에 같은 예정 시각만 중복 생성하지 않는다. `medication_id + care_space_id` 복합 FK가 다른 공간의 약 연결을 막는다. 일정은 알림 시각만 관리하며 실제 수량은 투약 로그에 저장한다. 홈의 오늘 일정은 활성 약의 활성 일정으로 계산한다. 일정 자체를 수정하거나 삭제해도 기존 로그와 일정 결과의 `schedule_time` 스냅샷은 변경하지 않는다.
+
+## 4.1 medication_schedule_outcomes
+
+사용자가 예정 일정에 대해 명시적으로 남긴 결과다. 실제 복용 기록과 분리하며 기록 부재만으로 자동 생성하지 않는다.
+
+| 필드 | 형식 | 규칙 |
+|---|---|---|
+| `id` | uuid | PK |
+| `care_space_id` | uuid | `care_spaces.id` FK, 격리 범위 |
+| `client_request_id` | uuid | 필수, 같은 복약 공간 안에서 unique |
+| `medication_id` | uuid | 생성 당시 일정의 약 ID, `medications.id` FK |
+| `schedule_id` | uuid nullable | 생성 당시 일정 ID, 일정 삭제 시 null |
+| `medication_name` | text | 생성 당시 약 이름 스냅샷 |
+| `medication_unit` | text | 생성 당시 약 단위 스냅샷 |
+| `schedule_time` | time(0) | 생성 당시 예정 시각 스냅샷 |
+| `scheduled_date` | date | 결과를 남긴 일정의 한국 달력 날짜 |
+| `outcome` | text | `not_taken / medication_unavailable`만 허용 |
+| `note` | text nullable | 최대 2000자 메모 |
+| `deleted_at` | timestamptz nullable | soft delete 감사 필드 |
+| `created_by` | uuid nullable | 생성 사용자 감사 필드 |
+| `updated_by` | uuid nullable | 마지막 변경 사용자 감사 필드 |
+| `created_at` | timestamptz | 최초 생성 시각 |
+| `updated_at` | timestamptz | 마지막 수정 시각 |
+
+insert 입력은 복약 공간, 일정, 한국 날짜, 결과, 메모와 요청 ID만 받는다. BEFORE trigger가 같은 복약 공간의 일정과 삭제되지 않은 약을 조회해 `medication_id`, 약 이름·단위와 일정 시각을 채우므로 클라이언트 스냅샷을 신뢰하지 않는다. 일정 삭제는 `schedule_id`만 null로 바꾸고 나머지 스냅샷을 보존한다.
+
+삭제되지 않은 행은 `(care_space_id, schedule_id, scheduled_date)`마다 하나만 허용한다. `(care_space_id, client_request_id)`도 unique이며, repository는 일정·날짜·결과·정규화한 메모가 기존 행과 같을 때만 멱등 성공으로 반환한다. 이 결과는 `medication_logs`가 아니므로 실제 복용 합계와 마지막 실제 복용에 포함하지 않는다.
 
 ## 5. medication_logs
 
@@ -211,15 +239,15 @@ insert trigger가 현재 약 이름·단위와 연결 일정 시각을 스냅샷
 | `created_at` | timestamptz | 생성 시각 |
 | `updated_at` | timestamptz | 마지막 수정 시각 |
 
-`subscription_id + schedule_id + scheduled_for`는 unique다. 일정과 delivery의 `care_space_id`도 복합 FK로 일치해야 한다. 최초 예정 시각과 이후 5분 간격의 각 회차가 별도 `scheduled_for`를 사용하므로 같은 회차는 중복 생성되지 않는다. 같은 한국 날짜와 공간에 같은 일정의 삭제되지 않은 투약 로그가 있거나 일정·약·구독·공간 멤버십이 비활성이면 새 회차를 만들지 않으며, 직전에 만들어진 `pending/failed` 회차는 `skipped`로 바꾸고 발송하지 않는다. `accepted`는 push service가 요청을 접수했다는 의미이며 기기에 정시에 표시되었음을 보장하지 않는다.
+`subscription_id + schedule_id + scheduled_for`는 unique다. 일정과 delivery의 `care_space_id`도 복합 FK로 일치해야 한다. 최초 예정 시각과 이후 5분 간격의 각 회차가 별도 `scheduled_for`를 사용하므로 같은 회차는 중복 생성되지 않는다. 같은 한국 날짜와 공간에 같은 일정의 삭제되지 않은 투약 로그 또는 명시적 일정 결과가 있거나 일정·약·구독·공간 멤버십이 비활성이면 새 회차를 만들지 않으며, 직전에 만들어진 `pending/failed` 회차는 `skipped`로 바꾸고 발송하지 않는다. `accepted`는 push service가 요청을 접수했다는 의미이며 기기에 정시에 표시되었음을 보장하지 않는다.
 
 기록이 없는 동안 생성되는 5분 간격 알림 회차와 네트워크 실패 재시도는 서로 다른 개념이다. 각 새 회차는 1회차 시도 번호와 함께 점유한다. 요청 중단이나 일시 실패가 발생하면 해당 회차부터 5분 이내에 최대 3회까지 같은 delivery 행을 다시 점유하며, 시도 번호가 맞는 결과만 완료 처리한다. 같은 일정과 한국 날짜에는 같은 논리 식별자와 Web Push topic을 사용한다. 기기에서는 기존 표시를 닫은 뒤 새 알림을 표시하고, 일정 알림은 TTL 0으로 push service에 보관하지 않는다.
 
 ### 7.4 RPC, Cron과 Vault
 
 - 서버의 구독 등록·해제·테스트 처리는 제한된 공개 RPC `register_push_subscription`, `unregister_push_subscription`, `get_push_subscription_for_test`를 사용한다. 각 RPC는 인증 사용자의 `auth.uid()`, 선택한 `care_space_id` 멤버십, endpoint의 소유권과 발송 비밀값을 모두 검사한다.
-- `claim_due_push_notifications`는 활성 약의 활성 일정에 대해 예정 시각부터 5분 간격의 최신 회차를 한국 시각으로 계산하고, 최근 3분 범위의 회차를 중복 없이 발송 대상으로 만든다. 같은 한국 날짜의 일정 기록이 생기거나 날짜가 끝나면 새 회차를 만들지 않는다.
-- `private.push_delivery_is_sendable`은 구독·대상 공간 멤버십·약·일정 활성 상태, 일정 시각과 회차 정렬, 한국 날짜와 같은 공간의 일정 기록 부재를 한 곳에서 검사한다.
+- `claim_due_push_notifications`는 활성 약의 활성 일정에 대해 예정 시각부터 5분 간격의 최신 회차를 한국 시각으로 계산하고, 최근 3분 범위의 회차를 중복 없이 발송 대상으로 만든다. 같은 한국 날짜의 실제 투약 로그 또는 명시적 일정 결과가 생기거나 날짜가 끝나면 새 회차를 만들지 않는다.
+- `private.push_delivery_is_sendable`은 구독·대상 공간 멤버십·약·일정 활성 상태, 일정 시각과 회차 정렬, 한국 날짜와 같은 공간의 실제 투약 로그·명시적 일정 결과 부재를 한 곳에서 검사한다.
 - `prepare_push_delivery_for_send`는 claim 이후 외부 Web Push 직전에 delivery를 잠그고 최신 상태를 다시 확인하며, 취소된 건은 `skipped` 처리하고 발송 payload를 반환하지 않는다.
 - `complete_push_delivery`는 Vercel 발송 결과를 기록하며 만료된 구독을 비활성화할 수 있다.
 - 알림 관련 모든 RPC는 Supabase Vault에 정확히 하나만 존재하는 `push_dispatch_secret`과 일치하는 값이 없으면 실행을 거부한다.
@@ -233,6 +261,7 @@ private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테�
 - `created_at`, `updated_at`, `taken_at`, `deleted_at`은 절대 순간인 `timestamptz`다.
 - 화면에는 `Asia/Seoul`로 변환해 표시한다.
 - 투약 로그의 날짜별 조회는 `taken_at`을 한국 시간으로 변환한 달력 날짜를 사용한다.
+- 일정 결과의 `scheduled_date`와 `schedule_time`은 한국 현지 달력 날짜·예정 시각 의미다.
 - `daily_status.date`와 일정 `time`은 이미 한국 현지 날짜·시각 의미다.
 - 클라이언트의 브라우저 시간대가 달라도 날짜 경계는 한국 기준으로 유지한다.
 - 알림 `scheduled_for`는 해당 한국 날짜의 일정 `time`을 최초 회차로 삼아 5분 간격으로 계산한 순간을 저장한다.
@@ -247,6 +276,8 @@ private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테�
 - `private.family_relationship_accesses(care_space_id, grantee_user_id) where ended_at is null` unique
 - 활성 가족 관계와 접근을 참여자·관계별로 찾기 위한 부분 인덱스
 - `medication_logs(care_space_id, client_request_id)` unique
+- `medication_schedule_outcomes(care_space_id, client_request_id)` unique
+- `medication_schedule_outcomes(care_space_id, schedule_id, scheduled_date) where schedule_id is not null and deleted_at is null` 부분 unique
 - `daily_status(care_space_id, date)` unique
 - `medication_logs(taken_at)`
 - `medication_logs(medication_id, taken_at)`
@@ -262,12 +293,14 @@ private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테�
 - `private.push_deliveries(subscription_id, schedule_id, scheduled_for)` unique
 - 대기 발송의 `scheduled_for` 인덱스
 - 기록된 일정 확인을 위한 `medication_logs(schedule_id, taken_at)` 부분 인덱스
+- 결과가 기록된 일정 확인을 위한 `medication_schedule_outcomes(care_space_id, scheduled_date, schedule_time)`과 `schedule_id` 부분 인덱스
 
-FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 일정 삭제는 기존 로그의 `schedule_id`를 `null`로 바꾸더라도 예정 스냅샷을 보존한다. 약 삭제는 행을 물리 삭제하지 않고 soft delete하여 로그의 약 이름·단위·실제 복용 시각·수량을 계속 조회할 수 있게 한다.
+FK 삭제 정책은 과거 로그와 일정 결과를 연쇄 삭제하지 않아야 한다. 일정 삭제는 기존 로그와 일정 결과의 `schedule_id`를 `null`로 바꾸더라도 예정 스냅샷을 보존한다. 약 삭제는 행을 물리 삭제하지 않고 soft delete하여 로그의 약 이름·단위·실제 복용 시각·수량과 일정 결과 스냅샷을 계속 조회할 수 있게 한다.
 
 ## 10. 갱신 규칙
 
 - `updated_at`은 DB trigger로 갱신한다.
+- 일정 결과의 약 ID·이름·단위·예정 시각 스냅샷은 insert 시 DB trigger가 같은 공간의 일정과 약에서 채운다. 이후 결과·메모·soft delete를 바꿔도 요청 ID·날짜·스냅샷은 유지한다.
 - 투약 로그의 약 이름·단위·예정 시각 스냅샷은 insert 시 DB trigger가 현재 설정에서 채운다.
 - 약·일정 설정을 나중에 변경해도 기존 로그 스냅샷은 자동 갱신하지 않는다. 사용자가 로그의 일정 연결 또는 추가 복용 분류를 명시적으로 정정한 경우에만 trigger가 `schedule_time`과 `is_extra`를 새 분류에 맞춘다.
 - 투약 로그의 update column grant와 repository 수정 입력은 `medication_id`를 포함하지 않는다. 일반 기록 편집은 약을 바꾸지 못하며 약 이름·단위 스냅샷도 그대로 유지한다.
@@ -302,6 +335,8 @@ FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 일�
 `20260830070000_reciprocal_family_relationships.sql`은 이후 새 요청을 명시적 양방향 보호자 요청으로 전환하고, 이전 문구로 만들어진 대기 요청을 재사용하지 않고 취소한다. 새 수락은 요청자와 수신자를 각각 상대 소유 공간의 보호자로 원자적으로 추가한다. 실제 멤버십이 남아 있는 기존 accepted 행은 현재 한 방향만 추적하는 관계로 보존해 양쪽 화면에 표시하되 반대 방향 권한을 만들지 않는다. 현재 상대 기록을 관리하는 참여자의 별도 공간 선택·동의로만 양방향 전환하고, 어느 참여자든 관계를 종료할 수 있다. 관계 접근은 부여 전 역할을 보존해 종료 때 안전하게 제거하거나 복원하며, 활성 관계 멤버십의 일반 한쪽 제거를 막는다. 새 대상 공간이나 양방향 동의를 전달하지 못하는 이전 생성·수락 함수는 실패하도록 유지한다.
 
 `20260830070001_index_family_relationship_audit_foreign_keys.sql`은 관계·접근 감사 외래키에 null 제외 부분 인덱스를 추가해 사용자·초대 삭제 시 참조 검사와 감사 조회가 전체 테이블 순차 검색으로 커지지 않게 한다.
+
+`20260830080000_add_medication_schedule_outcomes.sql`은 기존 테이블과 투약 로그를 변경하지 않고 `medication_schedule_outcomes` 테이블, 복합 FK·부분 unique, 스냅샷·감사 trigger, RLS와 명시적 GRANT를 추가한다. 기존 Push 유효성·claim·발송 준비 함수는 현재 본문과 서명을 유지하면서 같은 일정·한국 날짜의 삭제되지 않은 일정 결과도 반복 발송 중단 조건으로 확인하고, 알림 딥링크에 해당 회차의 한국 날짜를 고정하도록 교체한다. 새 테이블을 모르는 이전 앱도 기존 테이블을 그대로 사용할 수 있는 additive 변경이다.
 
 마이그레이션 적용 전 운영 DB를 백업한다. 적용 뒤에는 실제 기존 데이터 소유자를 확인해 미지정 공간에 소유자 멤버십을 수동으로 추가해야 한다. 자동으로 첫 로그인 사용자에게 할당하면 잘못된 사람에게 건강 기록이 노출될 수 있으므로 금지한다.
 

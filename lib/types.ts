@@ -103,6 +103,26 @@ export type MedicationSchedule = CareSpaceScopedAudit & {
   updated_at: string;
 };
 
+export type MedicationScheduleOutcomeValue =
+  | "not_taken"
+  | "medication_unavailable";
+
+export type MedicationScheduleOutcome = CareSpaceScopedAudit & {
+  id: string;
+  client_request_id: string;
+  medication_id: string;
+  schedule_id: string | null;
+  medication_name: string;
+  medication_unit: string;
+  schedule_time: string;
+  scheduled_date: string;
+  outcome: MedicationScheduleOutcomeValue;
+  note: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type MedicationLog = CareSpaceScopedAudit & {
   id: string;
   client_request_id: string;
@@ -135,6 +155,7 @@ export type DailyStatus = CareSpaceScopedAudit & {
 export type DB = {
   medications: Medication[];
   medication_schedules: MedicationSchedule[];
+  medication_schedule_outcomes: MedicationScheduleOutcome[];
   medication_logs: MedicationLog[];
   daily_status: DailyStatus[];
 };
@@ -165,6 +186,18 @@ export type AddScheduleInput = {
 export type UpdateScheduleInput = Partial<
   Pick<MedicationSchedule, "time" | "active">
 >;
+
+export type AddMedicationScheduleOutcomeInput = {
+  schedule_id: string;
+  scheduled_date: string;
+  outcome: MedicationScheduleOutcomeValue;
+  note?: string | null;
+  /**
+   * Generate this once per user submission and reuse it when retrying.
+   * The database unique constraint makes a repeated request idempotent.
+   */
+  client_request_id?: string;
+};
 
 export type AddMedicationLogInput = {
   medication_id: string;
@@ -305,6 +338,35 @@ type MedicationScheduleUpdate = Partial<
   >
 >;
 
+type MedicationScheduleOutcomeInsert = Pick<
+  MedicationScheduleOutcome,
+  | "care_space_id"
+  | "client_request_id"
+  | "schedule_id"
+  | "scheduled_date"
+  | "outcome"
+> &
+  Partial<
+    Pick<
+      MedicationScheduleOutcome,
+      | "id"
+      | "medication_id"
+      | "medication_name"
+      | "medication_unit"
+      | "schedule_time"
+      | "note"
+      | "deleted_at"
+      | "created_by"
+      | "updated_by"
+      | "created_at"
+      | "updated_at"
+    >
+  >;
+
+type MedicationScheduleOutcomeUpdate = Partial<
+  Pick<MedicationScheduleOutcome, "outcome" | "note" | "deleted_at">
+>;
+
 type MedicationLogInsert = Pick<
   MedicationLog,
   | "care_space_id"
@@ -443,6 +505,34 @@ export type Database = {
             columns: ["medication_id"];
             isOneToOne: false;
             referencedRelation: "medications";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      medication_schedule_outcomes: {
+        Row: MedicationScheduleOutcome;
+        Insert: MedicationScheduleOutcomeInsert;
+        Update: MedicationScheduleOutcomeUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "medication_schedule_outcomes_care_space_id_fkey";
+            columns: ["care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "medication_schedule_outcomes_medication_id_fkey";
+            columns: ["medication_id"];
+            isOneToOne: false;
+            referencedRelation: "medications";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "medication_schedule_outcomes_schedule_id_fkey";
+            columns: ["schedule_id"];
+            isOneToOne: false;
+            referencedRelation: "medication_schedules";
             referencedColumns: ["id"];
           },
         ];

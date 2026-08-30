@@ -1,4 +1,8 @@
-import type { DbRepository, RequiredAddMedicationLogInput } from "@/lib/db-repository";
+import type {
+  DbRepository,
+  RequiredAddMedicationLogInput,
+  RequiredAddMedicationScheduleOutcomeInput,
+} from "@/lib/db-repository";
 import type {
   AddMedicationInput,
   AddScheduleInput,
@@ -15,6 +19,7 @@ import type {
   Medication,
   MedicationLog,
   MedicationSchedule,
+  MedicationScheduleOutcome,
   PendingCareSpaceInvite,
   Profile,
   UpdateMedicationInput,
@@ -183,9 +188,43 @@ const memoryDb: DB = {
       created_at: SEED_TIME,
       updated_at: SEED_TIME,
     },
+    {
+      id: "med-family-refresh",
+      care_space_id: MOCK_SECOND_CARE_SPACE_ID,
+      created_by: MOCK_SECOND_OWNER_ID,
+      updated_by: MOCK_SECOND_OWNER_ID,
+      name: "가족 새로고침 확인약",
+      unit: "정",
+      active: false,
+      deleted_at: null,
+      quantity_options: [1],
+      created_at: SEED_TIME,
+      updated_at: SEED_TIME,
+    },
   ],
   medication_schedules: [],
-  medication_logs: [],
+  medication_schedule_outcomes: [],
+  medication_logs: [
+    {
+      id: "log-family-refresh",
+      care_space_id: MOCK_SECOND_CARE_SPACE_ID,
+      created_by: MOCK_SECOND_OWNER_ID,
+      updated_by: MOCK_SECOND_OWNER_ID,
+      client_request_id: "00000000-0000-4000-8000-000000000021",
+      medication_id: "med-family-refresh",
+      schedule_id: null,
+      medication_name: "가족 새로고침 확인약",
+      medication_unit: "정",
+      schedule_time: null,
+      taken_at: new Date().toISOString(),
+      quantity: 1,
+      note: "가족 공간 새로고침 확인 기록",
+      is_extra: true,
+      deleted_at: null,
+      created_at: SEED_TIME,
+      updated_at: SEED_TIME,
+    },
+  ],
   daily_status: [],
 };
 
@@ -282,6 +321,18 @@ function isSameLogRequest(
     Number(row.quantity) === Number(input.quantity) &&
     normalizedNullableText(row.note) === normalizedNullableText(input.note) &&
     row.is_extra === input.is_extra
+  );
+}
+
+function isSameScheduleOutcomeRequest(
+  row: MedicationScheduleOutcome,
+  input: RequiredAddMedicationScheduleOutcomeInput
+): boolean {
+  return (
+    row.schedule_id === input.schedule_id &&
+    row.scheduled_date === input.scheduled_date &&
+    row.outcome === input.outcome &&
+    normalizedNullableText(row.note) === normalizedNullableText(input.note)
   );
 }
 
@@ -744,6 +795,15 @@ export class MockDbRepository implements DbRepository {
             visibleMedicationIds.has(row.medication_id)
         )
         .sort((a, b) => a.time.localeCompare(b.time)),
+      medication_schedule_outcomes: memoryDb.medication_schedule_outcomes
+        .filter(
+          (row) => row.care_space_id === careSpaceId && row.deleted_at === null
+        )
+        .sort(
+          (a, b) =>
+            a.scheduled_date.localeCompare(b.scheduled_date) ||
+            a.schedule_time.localeCompare(b.schedule_time)
+        ),
       medication_logs: memoryDb.medication_logs
         .filter(
           (row) => row.care_space_id === careSpaceId && row.deleted_at === null
@@ -936,7 +996,74 @@ export class MockDbRepository implements DbRepository {
           }
         : log
     );
+    memoryDb.medication_schedule_outcomes =
+      memoryDb.medication_schedule_outcomes.map((outcome) =>
+        outcome.care_space_id === careSpaceId &&
+        outcome.schedule_id === scheduleId
+          ? {
+              ...outcome,
+              schedule_id: null,
+              updated_by: MOCK_USER_ID,
+              updated_at: now(),
+            }
+          : outcome
+      );
     return clone(current);
+  }
+
+  async addScheduleOutcome(
+    careSpaceId: string,
+    input: RequiredAddMedicationScheduleOutcomeInput
+  ): Promise<MedicationScheduleOutcome> {
+    const duplicate = memoryDb.medication_schedule_outcomes.find(
+      (outcome) =>
+        outcome.care_space_id === careSpaceId &&
+        outcome.client_request_id === input.client_request_id
+    );
+    if (duplicate) {
+      if (isSameScheduleOutcomeRequest(duplicate, input)) {
+        return clone(duplicate);
+      }
+      throw new Error(
+        "같은 요청 ID로 이미 다른 내용의 일정 결과가 저장되어 있습니다. 기록을 새로고침한 뒤 다시 시도해 주세요."
+      );
+    }
+
+    if (
+      memoryDb.medication_schedule_outcomes.some(
+        (outcome) =>
+          outcome.care_space_id === careSpaceId &&
+          outcome.schedule_id === input.schedule_id &&
+          outcome.scheduled_date === input.scheduled_date &&
+          outcome.deleted_at === null
+      )
+    ) {
+      throw new Error("이 일정 날짜에는 이미 결과가 기록되어 있습니다.");
+    }
+
+    const schedule = scheduleById(careSpaceId, input.schedule_id);
+    const medication = medicationById(careSpaceId, schedule.medication_id);
+    const timestamp = now();
+    const outcome: MedicationScheduleOutcome = {
+      id: id(),
+      care_space_id: careSpaceId,
+      created_by: MOCK_USER_ID,
+      updated_by: MOCK_USER_ID,
+      client_request_id: input.client_request_id,
+      medication_id: medication.id,
+      schedule_id: schedule.id,
+      medication_name: medication.name,
+      medication_unit: medication.unit,
+      schedule_time: schedule.time,
+      scheduled_date: input.scheduled_date,
+      outcome: input.outcome,
+      note: input.note,
+      deleted_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    memoryDb.medication_schedule_outcomes.push(outcome);
+    return clone(outcome);
   }
 
   async addLog(

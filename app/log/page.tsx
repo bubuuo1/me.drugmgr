@@ -16,6 +16,7 @@ import { useOnlineStatus } from "@/app/components/use-online-status";
 import {
   formatDateTime,
   formatKstDateTimeInput,
+  fromDateKey,
   parseKstDateTimeInput,
   toDateKey,
 } from "@/lib/date";
@@ -29,6 +30,34 @@ type LogFieldError = {
   message: string;
 };
 
+type ScheduleResult = "taken" | "not_taken" | "medication_unavailable";
+
+const SCHEDULE_RESULT_OPTIONS: Array<{
+  value: ScheduleResult;
+  label: string;
+}> = [
+  { value: "taken", label: "복용함" },
+  { value: "not_taken", label: "복용하지 않음" },
+  { value: "medication_unavailable", label: "약 없음" },
+];
+
+function scheduleResultLabel(
+  result: Exclude<ScheduleResult, "taken">
+): string {
+  return result === "not_taken" ? "복용하지 않음" : "약 없음";
+}
+
+function scheduleDateFromQuery(value: string | null): string {
+  const today = toDateKey(new Date());
+  if (!value) return today;
+  try {
+    fromDateKey(value);
+    return value;
+  } catch {
+    return today;
+  }
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "기록을 저장하지 못했습니다.";
 }
@@ -38,6 +67,11 @@ function MedLogInner() {
   const medId = params.get("med") ?? "";
   const requestedScheduleId = params.get("schedule");
   const requestedExtra = params.get("extra") === "1";
+  const requestedDate = params.get("date");
+  const scheduledDate = useMemo(
+    () => scheduleDateFromQuery(requestedDate),
+    [requestedDate]
+  );
   const online = useOnlineStatus();
   const {
     db,
@@ -46,6 +80,7 @@ function MedLogInner() {
     refresh,
     clearError,
     addLog,
+    addScheduleOutcome,
     canWriteRecords,
   } = useDb();
 
@@ -78,6 +113,8 @@ function MedLogInner() {
   );
   const [note, setNote] = useState("");
   const [manualExtra, setManualExtra] = useState(requestedExtra);
+  const [scheduleResult, setScheduleResult] =
+    useState<ScheduleResult>("taken");
   const [pending, setPending] = useState(false);
   const [fieldError, setFieldError] = useState<LogFieldError | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -227,6 +264,10 @@ function MedLogInner() {
 
   async function requestSave() {
     if (!online || pending) return;
+    if (effectiveSchedule && scheduleResult !== "taken") {
+      await persistScheduleOutcome();
+      return;
+    }
     const values = validate();
     if (!values) return;
     if (needsDuplicateConfirmation(values.parsedTakenAt)) {
@@ -234,6 +275,37 @@ function MedLogInner() {
       return;
     }
     await persist(values.parsedQuantity, values.parsedTakenAt);
+  }
+
+  async function persistScheduleOutcome() {
+    if (
+      !effectiveSchedule ||
+      scheduleResult === "taken" ||
+      !online ||
+      pending
+    ) {
+      return;
+    }
+
+    setPending(true);
+    setLocalError(null);
+    clearError();
+    try {
+      const saved = await addScheduleOutcome({
+        schedule_id: effectiveSchedule.id,
+        scheduled_date: scheduledDate,
+        outcome: scheduleResult,
+        note: note.trim() || null,
+        client_request_id: clientRequestId,
+      });
+      setSavedMessage(
+        `${saved.medication_name} · ${scheduleResultLabel(saved.outcome)} · 예정 ${saved.schedule_time} 기록 완료`
+      );
+    } catch (caught) {
+      setLocalError(errorMessage(caught));
+    } finally {
+      setPending(false);
+    }
   }
 
   async function persist(
@@ -279,6 +351,7 @@ function MedLogInner() {
   function recordAnother() {
     setSavedMessage(null);
     setManualExtra(true);
+    setScheduleResult("taken");
     setQuantity(null);
     setTakenAt(formatKstDateTimeInput(new Date()));
     setClientRequestId(crypto.randomUUID());
@@ -348,12 +421,43 @@ function MedLogInner() {
             </h2>
             <p className="mt-1 text-base leading-relaxed text-body">
               {effectiveSchedule
-                ? "이 일정에 실제 복용 내용을 연결합니다."
+                ? scheduleResult === "taken"
+                  ? "이 일정에 실제 복용 내용을 연결합니다."
+                  : "이 일정에 선택한 결과를 기록합니다."
                 : "예정 일정과 별개의 기록으로 저장합니다."}
             </p>
           </section>
 
-          {!booleanOnly && (
+          {effectiveSchedule && (
+            <fieldset className="flex flex-col gap-4" disabled={pending}>
+              <legend className="text-xl font-bold text-ink">일정 결과</legend>
+              <div className="grid gap-3">
+                {SCHEDULE_RESULT_OPTIONS.map((option) => {
+                  const selected = scheduleResult === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setScheduleResult(option.value);
+                        setFieldError(null);
+                      }}
+                      className={
+                        selected
+                          ? "flex min-h-14 items-center justify-center rounded-full bg-primary-active px-5 text-lg font-bold text-on-primary"
+                          : "flex min-h-14 items-center justify-center rounded-full border-2 border-hairline bg-canvas px-5 text-lg font-bold text-ink active:bg-surface-soft"
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
+
+          {scheduleResult === "taken" && !booleanOnly && (
             <fieldset className="flex flex-col gap-4" disabled={pending}>
               <legend className="text-xl font-bold text-ink">
                 몇 {unit} 드셨나요?
@@ -410,7 +514,7 @@ function MedLogInner() {
             </fieldset>
           )}
 
-          {booleanOnly && (
+          {scheduleResult === "taken" && booleanOnly && (
             <section>
               <h2 className="text-xl font-bold text-ink">복용 사실</h2>
               <p className="mt-2 rounded-2xl border border-success px-5 py-4 text-lg font-bold text-success">
@@ -419,27 +523,29 @@ function MedLogInner() {
             </section>
           )}
 
-          <section className="flex flex-col gap-3">
-            <DateTimePicker
-              id="taken-at"
-              value={takenAt}
-              label="실제 복용 시각"
-              onChange={(value) => {
-                setTakenAt(value);
-                clearFieldError("takenAt");
-              }}
-              disabled={pending}
-              describedBy={
-                fieldError?.field === "takenAt"
-                  ? "log-field-error"
-                  : "taken-at-help"
-              }
-              invalid={fieldError?.field === "takenAt"}
-            />
-            <p id="taken-at-help" className="text-base leading-relaxed text-muted">
-              현재 시각이 기본으로 입력되어 있습니다. 실제 복용 시각이 다르면 수정해 주세요.
-            </p>
-          </section>
+          {scheduleResult === "taken" && (
+            <section className="flex flex-col gap-3">
+              <DateTimePicker
+                id="taken-at"
+                value={takenAt}
+                label="실제 복용 시각"
+                onChange={(value) => {
+                  setTakenAt(value);
+                  clearFieldError("takenAt");
+                }}
+                disabled={pending}
+                describedBy={
+                  fieldError?.field === "takenAt"
+                    ? "log-field-error"
+                    : "taken-at-help"
+                }
+                invalid={fieldError?.field === "takenAt"}
+              />
+              <p id="taken-at-help" className="text-base leading-relaxed text-muted">
+                현재 시각이 기본으로 입력되어 있습니다. 실제 복용 시각이 다르면 수정해 주세요.
+              </p>
+            </section>
+          )}
 
           <section className="flex flex-col gap-3">
             <label htmlFor="log-note" className="text-xl font-bold text-ink">
@@ -466,7 +572,13 @@ function MedLogInner() {
             disabled={pending || !online}
             className="flex min-h-16 w-full items-center justify-center rounded-xl bg-primary-active px-6 text-xl font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
           >
-            {pending ? "저장 중입니다" : online ? "기록 저장" : "연결 후 저장 가능"}
+            {pending
+              ? "저장 중입니다"
+              : !online
+                ? "연결 후 저장 가능"
+                : effectiveSchedule && scheduleResult !== "taken"
+                  ? "일정 결과 저장"
+                  : "기록 저장"}
           </button>
         </form>
       )}

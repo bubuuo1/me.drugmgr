@@ -1,6 +1,7 @@
 import type {
   AddMedicationInput,
   AddMedicationLogInput,
+  AddMedicationScheduleOutcomeInput,
   AddScheduleInput,
   CareSpace,
   CareSpaceAccess,
@@ -15,6 +16,7 @@ import type {
   Medication,
   MedicationLog,
   MedicationSchedule,
+  MedicationScheduleOutcome,
   PendingCareSpaceInvite,
   UpdateMedicationInput,
   UpdateMedicationLogInput,
@@ -71,6 +73,10 @@ export interface DbRepository {
     patch: UpdateScheduleInput
   ): Promise<MedicationSchedule>;
   deleteSchedule(careSpaceId: string, id: string): Promise<MedicationSchedule>;
+  addScheduleOutcome(
+    careSpaceId: string,
+    input: RequiredAddMedicationScheduleOutcomeInput
+  ): Promise<MedicationScheduleOutcome>;
   addLog(
     careSpaceId: string,
     input: RequiredAddMedicationLogInput
@@ -98,4 +104,12 @@ export type RequiredAddMedicationLogInput = Omit<
   note: string | null;
   taken_at: string;
   is_extra: boolean;
+};
+
+export type RequiredAddMedicationScheduleOutcomeInput = Omit<
+  AddMedicationScheduleOutcomeInput,
+  "client_request_id" | "note"
+> & {
+  client_request_id: string;
+  note: string | null;
 };

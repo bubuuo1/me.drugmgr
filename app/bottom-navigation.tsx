@@ -35,10 +35,14 @@ export function BottomNavigation() {
     >
       {items.map((item) => {
         const current = isCurrentPath(pathname, item.href);
+        const href =
+          selectedCareSpace && selectedCareSpace.role !== "owner"
+            ? `${item.href}?space=${encodeURIComponent(selectedCareSpace.id)}`
+            : item.href;
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={href}
             replace
             aria-current={
               current ? (pathname === item.href ? "page" : "location") : undefined
