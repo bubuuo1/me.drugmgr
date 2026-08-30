@@ -646,7 +646,7 @@ test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 
   await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
 });
 
-test("320px와 375px 모바일 화면에서 주요 화면과 시간 선택기가 한 화면에 맞는다", async ({
+test("320px·375px·393px 모바일 화면에서 주요 화면과 날짜·시간 선택기가 한 화면에 맞는다", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 700 });
@@ -724,12 +724,54 @@ test("320px와 375px 모바일 화면에서 주요 화면과 시간 선택기가
     .toBe(true);
   await page.keyboard.press("Escape");
 
-  for (const width of [320, 375]) {
+  for (const width of [320, 375, 393]) {
     await page.setViewportSize({ width, height: 700 });
     await page.goto("/log?med=med-mestinon&extra=1");
-    await page
-      .getByRole("button", { name: /^실제 복용 시간, 현재/ })
-      .click();
+    const dateTrigger = page.getByRole("button", {
+      name: /^실제 복용 날짜, 현재/,
+    });
+    const timeTrigger = page.getByRole("button", {
+      name: /^실제 복용 시간, 현재/,
+    });
+    await expect(dateTrigger.getByText("날짜", { exact: true })).toBeVisible();
+    await expect(timeTrigger.getByText("시간", { exact: true })).toBeVisible();
+    const [dateTriggerBox, timeTriggerBox] = await Promise.all([
+      dateTrigger.boundingBox(),
+      timeTrigger.boundingBox(),
+    ]);
+    expect(dateTriggerBox).not.toBeNull();
+    expect(timeTriggerBox).not.toBeNull();
+    expect(Math.abs((dateTriggerBox?.x ?? 0) - (timeTriggerBox?.x ?? 0)))
+      .toBeLessThan(1);
+    expect(
+      Math.abs((dateTriggerBox?.width ?? 0) - (timeTriggerBox?.width ?? 0))
+    ).toBeLessThan(1);
+    expect(timeTriggerBox?.y ?? 0).toBeGreaterThanOrEqual(
+      (dateTriggerBox?.y ?? 0) + (dateTriggerBox?.height ?? 0)
+    );
+    expect(dateTriggerBox?.height ?? 0).toBeGreaterThanOrEqual(64);
+    expect(timeTriggerBox?.height ?? 0).toBeGreaterThanOrEqual(64);
+    expect((dateTriggerBox?.x ?? 0) + (dateTriggerBox?.width ?? 0))
+      .toBeLessThanOrEqual(width);
+    expect((timeTriggerBox?.x ?? 0) + (timeTriggerBox?.width ?? 0))
+      .toBeLessThanOrEqual(width);
+    if (width === 393) {
+      const dateValue = dateTrigger.locator("time");
+      const dateValueMetrics = await dateValue.evaluate((element) => {
+        const style = globalThis.getComputedStyle(element);
+        return {
+          height: element.getBoundingClientRect().height,
+          lineHeight: Number.parseFloat(style.lineHeight),
+          fitsHorizontally: element.scrollWidth <= element.clientWidth,
+        };
+      });
+      expect(dateValueMetrics.fitsHorizontally).toBe(true);
+      expect(dateValueMetrics.height).toBeLessThanOrEqual(
+        dateValueMetrics.lineHeight * 1.1
+      );
+    }
+
+    await timeTrigger.click();
     const timeDialog = page.getByRole("dialog", {
       name: "실제 복용 시간 선택",
       exact: true,
@@ -1216,7 +1258,8 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .getByRole("region", { name: "오늘 예정" })
     .getByRole("listitem")
     .filter({ hasText: keptScheduleTime + " · " + testMedicationName });
-  await expect(pendingScheduleRow).toContainText("아직 기록 없음");
+  await expect(pendingScheduleRow).not.toContainText("아직 기록 없음");
+  await expect(pendingScheduleRow).toContainText("기록하기");
   await expect(page.getByText(/예정 수량/)).toHaveCount(0);
   const scheduledHref = await scheduledLink.getAttribute("href");
   expect(scheduledHref).not.toBeNull();

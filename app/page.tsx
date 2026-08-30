@@ -175,17 +175,15 @@ export default function Home() {
                           {schedule.time} · {medication.name}
                         </p>
                       </div>
-                      <span className="flex flex-col text-right font-bold">
-                        <span className="text-muted">아직 기록 없음</span>
-                        <span className="text-primary-active">기록하기</span>
+                      <span className="font-bold text-primary-active">
+                        기록하기
                       </span>
                     </Link>
                   ) : (
-                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3">
+                    <div className="flex min-h-14 items-center rounded-xl border border-hairline bg-canvas px-4 py-3">
                       <p className="text-lg font-bold text-ink">
                         {schedule.time} · {medication.name}
                       </p>
-                      <span className="font-bold text-muted">아직 기록 없음</span>
                     </div>
                   )}
                 </li>

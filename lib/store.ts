@@ -46,12 +46,16 @@ const EMPTY_DB: DB = {
 };
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+const ACCESS_REVALIDATION_INTERVAL_MS = 60 * 1000;
+const DATA_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const repository: DbRepository = isMockDbEnabled
   ? new MockDbRepository()
   : new SupabaseDbRepository();
 let repositoryGeneration = 0;
+
+type BackgroundRevalidationScope = "access" | "full";
 
 class StaleRepositoryOperationError extends Error {
   constructor() {
@@ -377,6 +381,10 @@ export function DbProvider({ children }: PropsWithChildren) {
   );
   const [dataRequests] = useState(() => new DataRequestCoordinator());
   const backgroundRevalidation = useRef<Promise<void> | null>(null);
+  const backgroundRevalidationScope =
+    useRef<BackgroundRevalidationScope | null>(null);
+  const queuedBackgroundRevalidationScope =
+    useRef<BackgroundRevalidationScope | null>(null);
   const [careSpaceMembersBySpace, setCareSpaceMembersBySpace] = useState<
     Record<string, CareSpaceMemberWithProfile[]>
   >({});
@@ -550,70 +558,142 @@ export function DbProvider({ children }: PropsWithChildren) {
     setDb(result.next);
   }, [dataRequests, run]);
 
-  const revalidateAccessibleSpacesSilently = useCallback((): Promise<void> => {
-    if (backgroundRevalidation.current) {
-      return backgroundRevalidation.current;
-    }
-    if (dataRequests.hasActiveForegroundOperation()) {
-      return Promise.resolve();
-    }
-
-    const repositoryGenerationAtStart = repositoryGeneration;
-    const requestGeneration = dataRequests.snapshot();
-    const runVersionAtStart = dataRequests.foregroundOperationSnapshot();
-    const preferredId = dataRequests.selectedId();
-    const operation = (async () => {
-      const canApply = () =>
-        repositoryGenerationAtStart === repositoryGeneration &&
-        dataRequests.isCurrent(requestGeneration) &&
-        dataRequests.foregroundOperationSnapshot() === runVersionAtStart &&
-        !dataRequests.hasActiveForegroundOperation();
-
-      const spaces = await repository.fetchCareSpaces();
-      const selected = preferredCareSpace(spaces, preferredId);
-      const selectedAccessWasRevoked =
-        preferredId !== null &&
-        !spaces.some((space) => space.id === preferredId);
-      if (!canApply()) return;
-
-      dataRequests.select(selected?.id ?? null);
-      setCareSpaces((current) =>
-        isStructurallyEqual(current, spaces) ? current : spaces
-      );
-      setSelectedCareSpaceId(selected?.id ?? null);
-      if (selectedAccessWasRevoked) {
-        setDb(EMPTY_DB);
+  const revalidateAccessibleSpacesSilently = useCallback(
+    (
+      requestedScope: BackgroundRevalidationScope = "full"
+    ): Promise<void> => {
+      if (backgroundRevalidation.current) {
+        if (
+          requestedScope === "full" &&
+          backgroundRevalidationScope.current === "access"
+        ) {
+          queuedBackgroundRevalidationScope.current = "full";
+        }
+        return backgroundRevalidation.current;
+      }
+      if (dataRequests.hasActiveForegroundOperation()) {
+        return Promise.resolve();
       }
 
-      const [pendingInvitesResult, nextResult] = await Promise.allSettled([
-        repository.fetchPendingCareSpaceInvites(),
-        selected ? repository.fetchAll(selected.id) : Promise.resolve(EMPTY_DB),
-      ]);
-      if (!canApply()) return;
+      async function revalidate(scope: BackgroundRevalidationScope) {
+        const repositoryGenerationAtStart = repositoryGeneration;
+        const requestGeneration = dataRequests.snapshot();
+        const runVersionAtStart = dataRequests.foregroundOperationSnapshot();
+        const preferredId = dataRequests.selectedId();
+        const canApply = () =>
+          repositoryGenerationAtStart === repositoryGeneration &&
+          dataRequests.isCurrent(requestGeneration) &&
+          dataRequests.foregroundOperationSnapshot() === runVersionAtStart &&
+          !dataRequests.hasActiveForegroundOperation();
 
-      if (pendingInvitesResult.status === "fulfilled") {
-        setPendingCareSpaceInvites((current) =>
-          isStructurallyEqual(current, pendingInvitesResult.value)
-            ? current
-            : pendingInvitesResult.value
+        const spaces = await repository.fetchCareSpaces();
+        const selected = preferredCareSpace(spaces, preferredId);
+        const selectedAccessWasRevoked =
+          preferredId !== null &&
+          !spaces.some((space) => space.id === preferredId);
+        if (!canApply()) return;
+
+        dataRequests.select(selected?.id ?? null);
+        setCareSpaces((current) =>
+          isStructurallyEqual(current, spaces) ? current : spaces
         );
+        setSelectedCareSpaceId(selected?.id ?? null);
+        if (selectedAccessWasRevoked) {
+          setDb(EMPTY_DB);
+        }
+
+        const shouldRefreshCurrentData =
+          scope === "full" || selectedAccessWasRevoked;
+        const familyResult =
+          selected && globalThis.location.pathname === "/family"
+            ? Promise.all([
+                repository.fetchCareSpaceMembers(selected.id),
+                selected.role === "owner"
+                  ? repository.fetchCareSpaceInvites(selected.id)
+                  : Promise.resolve([]),
+                repository.fetchFamilyRelationships(),
+              ])
+            : Promise.resolve(null);
+        const [pendingInvitesResult, nextResult, familyRefreshResult] =
+          await Promise.allSettled([
+            repository.fetchPendingCareSpaceInvites(),
+            shouldRefreshCurrentData
+              ? selected
+                ? repository.fetchAll(selected.id)
+                : Promise.resolve(EMPTY_DB)
+              : Promise.resolve(null),
+            familyResult,
+          ]);
+        if (!canApply()) return;
+
+        if (pendingInvitesResult.status === "fulfilled") {
+          setPendingCareSpaceInvites((current) =>
+            isStructurallyEqual(current, pendingInvitesResult.value)
+              ? current
+              : pendingInvitesResult.value
+          );
+        }
+        if (nextResult.status === "fulfilled" && nextResult.value !== null) {
+          const nextDb = nextResult.value;
+          setDb((current) =>
+            isStructurallyEqual(current, nextDb) ? current : nextDb
+          );
+        }
+        if (
+          selected &&
+          familyRefreshResult.status === "fulfilled" &&
+          familyRefreshResult.value
+        ) {
+          const [members, invites, relationships] = familyRefreshResult.value;
+          setCareSpaceMembersBySpace((current) =>
+            isStructurallyEqual(current[selected.id] ?? [], members)
+              ? current
+              : { ...current, [selected.id]: members }
+          );
+          setCareSpaceInvitesBySpace((current) =>
+            isStructurallyEqual(current[selected.id] ?? [], invites)
+              ? current
+              : { ...current, [selected.id]: invites }
+          );
+          setFamilyRelationships((current) =>
+            isStructurallyEqual(current, relationships)
+              ? current
+              : relationships
+          );
+        }
       }
-      if (nextResult.status === "fulfilled") {
-        setDb((current) =>
-          isStructurallyEqual(current, nextResult.value)
-            ? current
-            : nextResult.value
-        );
-      }
-    })();
-    const trackedOperation = operation.finally(() => {
-      if (backgroundRevalidation.current === trackedOperation) {
-        backgroundRevalidation.current = null;
-      }
-    });
-    backgroundRevalidation.current = trackedOperation;
-    return trackedOperation;
-  }, [dataRequests]);
+
+      const operation = (async () => {
+        let scope: BackgroundRevalidationScope | null = requestedScope;
+        let firstError: unknown = null;
+        while (scope !== null) {
+          backgroundRevalidationScope.current = scope;
+          try {
+            await revalidate(scope);
+          } catch (reason: unknown) {
+            firstError ??= reason;
+          }
+          if (dataRequests.hasActiveForegroundOperation()) {
+            queuedBackgroundRevalidationScope.current = null;
+            break;
+          }
+          scope = queuedBackgroundRevalidationScope.current;
+          queuedBackgroundRevalidationScope.current = null;
+        }
+        if (firstError !== null) throw firstError;
+      })();
+      const trackedOperation = operation.finally(() => {
+        if (backgroundRevalidation.current === trackedOperation) {
+          backgroundRevalidation.current = null;
+          backgroundRevalidationScope.current = null;
+          queuedBackgroundRevalidationScope.current = null;
+        }
+      });
+      backgroundRevalidation.current = trackedOperation;
+      return trackedOperation;
+    },
+    [dataRequests]
+  );
 
   const refresh = useCallback(async () => {
     if (!selectedCareSpace) {
@@ -901,26 +981,44 @@ export function DbProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (isMockDbEnabled || privacyLocked || !initialized) return;
 
-    function validateCurrentAccess() {
+    function canRevalidateVisiblePage() {
       if (
         globalThis.document.visibilityState !== "visible" ||
         globalThis.location.pathname === "/login" ||
         globalThis.location.pathname.startsWith("/auth/")
       ) {
-        return;
+        return false;
       }
-      void revalidateAccessibleSpacesSilently().catch(() => undefined);
+      return true;
     }
 
-    const intervalId = globalThis.setInterval(validateCurrentAccess, 30_000);
-    globalThis.addEventListener("focus", validateCurrentAccess);
-    globalThis.document.addEventListener("visibilitychange", validateCurrentAccess);
+    function revalidateAccess() {
+      if (!canRevalidateVisiblePage()) return;
+      void revalidateAccessibleSpacesSilently("access").catch(() => undefined);
+    }
+
+    function revalidateAll() {
+      if (!canRevalidateVisiblePage()) return;
+      void revalidateAccessibleSpacesSilently("full").catch(() => undefined);
+    }
+
+    const accessIntervalId = globalThis.setInterval(
+      revalidateAccess,
+      ACCESS_REVALIDATION_INTERVAL_MS
+    );
+    const dataIntervalId = globalThis.setInterval(
+      revalidateAll,
+      DATA_REVALIDATION_INTERVAL_MS
+    );
+    globalThis.addEventListener("focus", revalidateAll);
+    globalThis.document.addEventListener("visibilitychange", revalidateAll);
     return () => {
-      globalThis.clearInterval(intervalId);
-      globalThis.removeEventListener("focus", validateCurrentAccess);
+      globalThis.clearInterval(accessIntervalId);
+      globalThis.clearInterval(dataIntervalId);
+      globalThis.removeEventListener("focus", revalidateAll);
       globalThis.document.removeEventListener(
         "visibilitychange",
-        validateCurrentAccess
+        revalidateAll
       );
     };
   }, [initialized, privacyLocked, revalidateAccessibleSpacesSilently]);

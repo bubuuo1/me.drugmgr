@@ -48,12 +48,14 @@ type SharedPickerProps = {
 type DatePickerProps = SharedPickerProps & {
   value: string;
   label: string;
+  displayLabel?: string;
   onChange: (value: string) => void;
 };
 
 type TimePickerProps = SharedPickerProps & {
   value: string;
   label: string;
+  displayLabel?: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
   triggerRef?: (element: HTMLButtonElement | null) => void;
@@ -195,6 +197,7 @@ export function DatePicker({
   id,
   value,
   label,
+  displayLabel = label,
   onChange,
   disabled = false,
   invalid = false,
@@ -285,10 +288,12 @@ export function DatePicker({
           <CalendarDays className="size-5" aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-muted">{label}</span>
+          <span className="block text-sm font-bold text-muted">
+            {displayLabel}
+          </span>
           <time
             dateTime={value}
-            className="mt-0.5 block break-words text-lg font-bold leading-snug text-ink"
+            className="mt-0.5 block break-keep text-lg font-bold leading-snug text-ink"
           >
             {formatKoreanFullDate(value)}
           </time>
@@ -491,6 +496,7 @@ export function TimePicker({
   id,
   value,
   label,
+  displayLabel = label,
   onChange,
   disabled = false,
   invalid = false,
@@ -559,15 +565,18 @@ export function TimePicker({
           <Clock3 className="size-5" aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-muted">{label}</span>
-          <span
+          <span className="block text-sm font-bold text-muted">
+            {displayLabel}
+          </span>
+          <time
+            dateTime={value || undefined}
             className={cn(
               "mt-0.5 block text-lg font-bold leading-snug",
               value ? "text-ink" : "text-muted"
             )}
           >
             {timeLabel(value)}
-          </span>
+          </time>
         </span>
         <ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" />
       </Dialog.Trigger>
@@ -683,11 +692,12 @@ export function DateTimePicker({
       className={cn("min-w-0", className)}
     >
       <legend className="text-xl font-bold text-ink">{label}</legend>
-      <div className="mt-3 grid gap-3 min-[380px]:grid-cols-2">
+      <div className="mt-3 grid gap-3">
         <DatePicker
           id={`${id}-date`}
           value={date}
           label={dateLabel}
+          displayLabel="날짜"
           onChange={(nextDate) => onChange(`${nextDate}T${time}`)}
           disabled={disabled}
           invalid={invalid}
@@ -697,6 +707,7 @@ export function DateTimePicker({
           id={`${id}-time`}
           value={time}
           label={timePickerLabel}
+          displayLabel="시간"
           onChange={(nextTime) => onChange(`${date}T${nextTime}`)}
           disabled={disabled}
           invalid={invalid}
