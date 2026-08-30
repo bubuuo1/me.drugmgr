@@ -99,6 +99,9 @@ export async function sendInviteEmail({
   const inviteUrl = new URL("/family", configuration.appBaseUrl);
   const inviteUrlString = inviteUrl.toString();
   const escapedInviteUrl = htmlEscape(inviteUrlString);
+  const plainDescription =
+    "초대한 사람이 내 복약 기록을 보호자로 관리하도록 요청했습니다. 수락할 때 내가 소유한 복약 공간을 직접 선택해야 하며, 보호자는 그 공간의 약·일정·투약·상태 기록을 조회하고 변경할 수 있습니다.";
+  const htmlDescription = htmlEscape(plainDescription);
 
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
@@ -119,23 +122,25 @@ export async function sendInviteEmail({
   const info = await transporter.sendMail({
     from: configuration.from,
     to: recipientEmail,
-    subject: "[투약 관리] 가족 복약 기록 초대",
+    subject: "[투약 관리] 가족 복약 기록 관리 요청",
     text: [
-      "가족 복약 기록 공유 초대가 도착했습니다.",
+      "가족 복약 기록 관리 요청이 도착했습니다.",
       "",
-      "아래 주소에서 이 메일을 받은 Google 계정으로 로그인한 뒤 초대를 수락하거나 거절해 주세요.",
+      plainDescription,
+      "",
+      "아래 주소에서 이 메일을 받은 Google 계정으로 로그인한 뒤 관리 요청을 수락하거나 거절해 주세요.",
       inviteUrlString,
       "",
-      "본인이 요청한 초대가 아니라면 이 메일을 무시해 주세요.",
+      "본인이 예상한 관리 요청이 아니라면 이 메일을 무시해 주세요.",
     ].join("\n"),
     html: [
       '<div style="font-family:Arial,\'Noto Sans KR\',sans-serif;line-height:1.6;color:#222">',
-      "<h1 style=\"font-size:22px\">가족 복약 기록 공유 초대</h1>",
-      "<p>가족 복약 기록을 함께 확인할 수 있는 초대가 도착했습니다.</p>",
-      "<p>아래 버튼을 누른 뒤 이 메일을 받은 Google 계정으로 로그인하여 초대를 수락하거나 거절해 주세요.</p>",
-      `<p><a href="${escapedInviteUrl}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#222;color:#fff;text-decoration:none;font-weight:700">초대 확인하기</a></p>`,
+      "<h1 style=\"font-size:22px\">가족 복약 기록 관리 요청</h1>",
+      `<p>${htmlDescription}</p>`,
+      "<p>아래 버튼을 누른 뒤 이 메일을 받은 Google 계정으로 로그인하여 관리 요청을 수락하거나 거절해 주세요.</p>",
+      `<p><a href="${escapedInviteUrl}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#222;color:#fff;text-decoration:none;font-weight:700">관리 요청 확인하기</a></p>`,
       `<p style="font-size:13px;color:#666;word-break:break-all">버튼이 열리지 않으면 다음 주소를 입력하세요.<br>${escapedInviteUrl}</p>`,
-      '<p style="font-size:13px;color:#666">본인이 요청한 초대가 아니라면 이 메일을 무시해 주세요.</p>',
+      '<p style="font-size:13px;color:#666">본인이 예상한 관리 요청이 아니라면 이 메일을 무시해 주세요.</p>',
       "</div>",
     ].join(""),
     disableFileAccess: true,

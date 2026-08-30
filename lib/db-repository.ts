@@ -32,7 +32,10 @@ export interface DbRepository {
     careSpaceId: string,
     input: CreateCareSpaceInviteInput
   ): Promise<CareSpaceInvite>;
-  acceptCareSpaceInvite(inviteId: string): Promise<CareSpaceMember>;
+  acceptCareSpaceInvite(
+    inviteId: string,
+    inviterCaregiverCareSpaceId: string | null
+  ): Promise<CareSpaceMember>;
   declineCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite>;
   revokeCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite>;
   removeCareSpaceMember(

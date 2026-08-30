@@ -17,7 +17,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const DELIVERY_FAILURE_MESSAGE =
-  "초대 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  "관리 요청 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
 function result(ok: boolean, message: string): SendCareSpaceInviteEmailResult {
   return { ok, message };
@@ -37,7 +37,7 @@ function logServerFailure(scope: string, error: unknown): void {
 
 function inviteDispatchSecret(): string {
   const value = process.env.PUSH_DISPATCH_SECRET?.trim();
-  if (!value) throw new Error("초대 메일 서버 인증 설정이 필요합니다.");
+  if (!value) throw new Error("관리 요청 메일 서버 인증 설정이 필요합니다.");
   return value;
 }
 
@@ -45,7 +45,7 @@ export async function sendCareSpaceInviteEmail(
   inviteId: string
 ): Promise<SendCareSpaceInviteEmailResult> {
   if (typeof inviteId !== "string" || inviteId.length > 100) {
-    return result(false, "유효한 가족 초대를 선택해 주세요.");
+    return result(false, "유효한 가족 기록 관리 요청을 선택해 주세요.");
   }
 
   const normalizedInviteId = inviteId.trim();
@@ -54,12 +54,12 @@ export async function sendCareSpaceInviteEmail(
   // an external SMTP server.
   if (process.env.NEXT_PUBLIC_USE_MOCK_DB === "true") {
     return normalizedInviteId
-      ? result(true, "초대 메일을 보냈습니다.")
-      : result(false, "유효한 가족 초대를 선택해 주세요.");
+      ? result(true, "관리 요청 메일을 보냈습니다.")
+      : result(false, "유효한 가족 기록 관리 요청을 선택해 주세요.");
   }
 
   if (!UUID_PATTERN.test(normalizedInviteId)) {
-    return result(false, "유효한 가족 초대를 선택해 주세요.");
+    return result(false, "유효한 가족 기록 관리 요청을 선택해 주세요.");
   }
 
   try {
@@ -89,7 +89,7 @@ export async function sendCareSpaceInviteEmail(
     if (!invite) {
       return result(
         false,
-        "이 초대를 보낼 권한이 없거나 초대를 찾을 수 없습니다."
+        "이 관리 요청을 보낼 권한이 없거나 요청을 찾을 수 없습니다."
       );
     }
 
@@ -108,19 +108,19 @@ export async function sendCareSpaceInviteEmail(
     if (!ownerMembership) {
       return result(
         false,
-        "이 초대를 보낼 권한이 없거나 초대를 찾을 수 없습니다."
+        "이 관리 요청을 보낼 권한이 없거나 요청을 찾을 수 없습니다."
       );
     }
 
     if (invite.status !== "pending") {
-      return result(false, "대기 중인 초대만 메일로 보낼 수 있습니다.");
+      return result(false, "대기 중인 관리 요청만 메일로 보낼 수 있습니다.");
     }
 
     const expiresAt = Date.parse(invite.expires_at);
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       return result(
         false,
-        "만료된 초대입니다. 새 초대를 만든 뒤 다시 보내 주세요."
+        "만료된 관리 요청입니다. 새 요청을 만든 뒤 다시 보내 주세요."
       );
     }
 
@@ -145,33 +145,33 @@ export async function sendCareSpaceInviteEmail(
       return result(false, DELIVERY_FAILURE_MESSAGE);
     }
     if (emailClaim === "cooldown") {
-      return result(false, "같은 초대 메일은 1분 후에 다시 보낼 수 있습니다.");
+      return result(false, "같은 관리 요청 메일은 1분 후에 다시 보낼 수 있습니다.");
     }
     if (emailClaim === "daily_limit") {
       return result(
         false,
-        "오늘 보낼 수 있는 초대 메일 수를 모두 사용했습니다. 내일 다시 시도해 주세요."
+        "오늘 보낼 수 있는 관리 요청 메일 수를 모두 사용했습니다. 내일 다시 시도해 주세요."
       );
     }
     if (emailClaim === "global_limit") {
       return result(
         false,
-        "오늘 전체 초대 메일 발송 한도에 도달했습니다. 내일 다시 시도해 주세요."
+        "오늘 전체 관리 요청 메일 발송 한도에 도달했습니다. 내일 다시 시도해 주세요."
       );
     }
     if (emailClaim === "recipient_limit") {
       return result(
         false,
-        "해당 주소로 오늘 보낼 수 있는 초대 메일 수를 모두 사용했습니다. 내일 다시 시도해 주세요."
+        "해당 주소로 오늘 보낼 수 있는 관리 요청 메일 수를 모두 사용했습니다. 내일 다시 시도해 주세요."
       );
     }
     if (emailClaim === "not_pending") {
-      return result(false, "대기 중인 초대만 메일로 보낼 수 있습니다.");
+      return result(false, "대기 중인 관리 요청만 메일로 보낼 수 있습니다.");
     }
     if (emailClaim === "expired") {
       return result(
         false,
-        "만료된 초대입니다. 새 초대를 만든 뒤 다시 보내 주세요."
+        "만료된 관리 요청입니다. 새 요청을 만든 뒤 다시 보내 주세요."
       );
     }
     if (emailClaim !== "claimed") {
@@ -189,7 +189,7 @@ export async function sendCareSpaceInviteEmail(
       return result(false, DELIVERY_FAILURE_MESSAGE);
     }
 
-    return result(true, "초대 메일을 보냈습니다.");
+    return result(true, "관리 요청 메일을 보냈습니다.");
   } catch (error) {
     logServerFailure("care-space invite email action failed", error);
     return result(false, DELIVERY_FAILURE_MESSAGE);

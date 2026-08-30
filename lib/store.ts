@@ -161,8 +161,8 @@ function normalizedInviteInput(
   ) {
     throw new Error("초대할 Google 계정 이메일을 확인해 주세요.");
   }
-  if (input.role !== "caregiver" && input.role !== "viewer") {
-    throw new Error("유효한 가족 역할을 선택해 주세요.");
+  if (input.role !== "caregiver") {
+    throw new Error("가족 기록 관리 요청은 보호자 권한으로만 보낼 수 있습니다.");
   }
   if (input.expires_at !== undefined) assertIsoDate(input.expires_at);
   return { ...input, email };
@@ -275,7 +275,10 @@ export type DbContextValue = {
   purgeSensitiveState(): void;
   updateCareSpaceName(name: string): Promise<CareSpaceAccess>;
   createCareSpaceInvite(input: CreateCareSpaceInviteInput): Promise<CareSpaceInvite>;
-  acceptCareSpaceInvite(inviteId: string): Promise<void>;
+  acceptCareSpaceInvite(
+    inviteId: string,
+    inviterCaregiverCareSpaceId?: string | null
+  ): Promise<void>;
   declineCareSpaceInvite(inviteId: string): Promise<void>;
   revokeCareSpaceInvite(inviteId: string): Promise<void>;
   removeCareSpaceMember(userId: string): Promise<void>;
@@ -626,8 +629,16 @@ export function DbProvider({ children }: PropsWithChildren) {
   );
 
   const acceptCareSpaceInvite = useCallback(
-    async (inviteId: string) => {
-      const member = await run(() => repository.acceptCareSpaceInvite(inviteId));
+    async (
+      inviteId: string,
+      inviterCaregiverCareSpaceId: string | null = null
+    ) => {
+      const member = await run(() =>
+        repository.acceptCareSpaceInvite(
+          inviteId,
+          inviterCaregiverCareSpaceId
+        )
+      );
       setPendingCareSpaceInvites((current) =>
         current.filter((invite) => invite.id !== inviteId)
       );

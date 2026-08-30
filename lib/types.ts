@@ -45,6 +45,7 @@ export type CareSpaceInvite = {
   care_space_id: string;
   email: string;
   role: CareSpaceInviteRole;
+  inviter_caregiver_care_space_id: string | null;
   status: CareSpaceInviteStatus;
   invited_by: string;
   accepted_by: string | null;
@@ -54,8 +55,10 @@ export type CareSpaceInvite = {
   updated_at: string;
 };
 
-export type PendingCareSpaceInvite = CareSpaceInvite & {
-  care_space_name: string;
+export type PendingCareSpaceInvite = Pick<
+  CareSpaceInvite,
+  "id" | "email" | "role" | "status" | "expires_at" | "created_at"
+> & {
   inviter_display_name: string | null;
 };
 
@@ -130,7 +133,7 @@ export type AddMedicationInput = {
 
 export type CreateCareSpaceInviteInput = {
   email: string;
-  role: CareSpaceInviteRole;
+  role: "caregiver";
   expires_at?: string;
 };
 
@@ -225,6 +228,7 @@ type CareSpaceInviteInsert = Pick<
   "care_space_id" | "email" | "role" | "invited_by"
 > & {
   id?: string;
+  inviter_caregiver_care_space_id?: string | null;
   accepted_by?: string | null;
   expires_at?: string;
   status?: CareSpaceInviteStatus;
@@ -236,7 +240,11 @@ type CareSpaceInviteInsert = Pick<
 type CareSpaceInviteUpdate = Partial<
   Pick<
     CareSpaceInvite,
-    "status" | "accepted_by" | "expires_at" | "responded_at"
+    | "status"
+    | "accepted_by"
+    | "expires_at"
+    | "responded_at"
+    | "inviter_caregiver_care_space_id"
   >
 >;
 
@@ -379,6 +387,13 @@ export type Database = {
             referencedRelation: "care_spaces";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "care_space_invites_inviter_caregiver_care_space_id_fkey";
+            columns: ["inviter_caregiver_care_space_id"];
+            isOneToOne: false;
+            referencedRelation: "care_spaces";
+            referencedColumns: ["id"];
+          },
         ];
       };
       medications: {
@@ -466,7 +481,7 @@ export type Database = {
           p_care_space_id: string;
           p_email: string;
           p_expires_at?: string;
-          p_role: CareSpaceInviteRole;
+          p_role: "caregiver";
         };
         Returns: CareSpaceInvite;
       };
@@ -475,7 +490,10 @@ export type Database = {
         Returns: string;
       };
       accept_care_space_invite: {
-        Args: { p_invite_id: string };
+        Args: {
+          p_invite_id: string;
+          p_inviter_caregiver_care_space_id: string | null;
+        };
         Returns: CareSpaceMember;
       };
       decline_care_space_invite: {

@@ -26,6 +26,7 @@ export const MOCK_USER_ID = "mock-user";
 export const MOCK_USER_EMAIL = "mock@example.com";
 export const MOCK_CARE_SPACE_ID = "mock-care-space";
 export const MOCK_SECOND_CARE_SPACE_ID = "mock-second-care-space";
+const MOCK_INVITE_SOURCE_CARE_SPACE_ID = "mock-invite-source-care-space";
 const MOCK_FAMILY_USER_ID = "mock-family-user";
 const MOCK_SECOND_OWNER_ID = "mock-second-owner";
 
@@ -68,6 +69,13 @@ const careSpaces: CareSpace[] = [
     created_at: SEED_TIME,
     updated_at: SEED_TIME,
   },
+  {
+    id: MOCK_INVITE_SOURCE_CARE_SPACE_ID,
+    name: "요청자 비공개 공간",
+    created_by: MOCK_SECOND_OWNER_ID,
+    created_at: SEED_TIME,
+    updated_at: SEED_TIME,
+  },
 ];
 
 const careSpaceMembers: CareSpaceMember[] = [
@@ -103,9 +111,32 @@ const careSpaceMembers: CareSpaceMember[] = [
     created_at: SEED_TIME,
     updated_at: SEED_TIME,
   },
+  {
+    care_space_id: MOCK_INVITE_SOURCE_CARE_SPACE_ID,
+    user_id: MOCK_SECOND_OWNER_ID,
+    role: "owner",
+    invited_by: null,
+    created_at: SEED_TIME,
+    updated_at: SEED_TIME,
+  },
 ];
 
-const careSpaceInvites: CareSpaceInvite[] = [];
+const careSpaceInvites: CareSpaceInvite[] = [
+  {
+    id: "mock-incoming-management-request",
+    care_space_id: MOCK_INVITE_SOURCE_CARE_SPACE_ID,
+    email: MOCK_USER_EMAIL,
+    role: "caregiver",
+    inviter_caregiver_care_space_id: null,
+    status: "pending",
+    invited_by: MOCK_SECOND_OWNER_ID,
+    accepted_by: null,
+    expires_at: "2099-12-31T23:59:59.000Z",
+    responded_at: null,
+    created_at: SEED_TIME,
+    updated_at: SEED_TIME,
+  },
+];
 
 const memoryDb: DB = {
   medications: [
@@ -222,7 +253,7 @@ function logById(careSpaceId: string, logId: string): MedicationLog {
 }
 
 function inviteById(inviteId: string): CareSpaceInvite {
-  return careSpaceInvites.find((invite) => invite.id === inviteId) ?? missing("가족 초대");
+  return careSpaceInvites.find((invite) => invite.id === inviteId) ?? missing("가족 기록 관리 요청");
 }
 
 function replaceById<T extends { id: string }>(rows: T[], row: T): void {
@@ -294,8 +325,12 @@ export class MockDbRepository implements DbRepository {
             invite.email.toLocaleLowerCase() === MOCK_USER_EMAIL
         )
         .map((invite) => ({
-          ...invite,
-          care_space_name: careSpaceById(invite.care_space_id).name,
+          id: invite.id,
+          email: invite.email,
+          role: invite.role,
+          status: invite.status,
+          expires_at: invite.expires_at,
+          created_at: invite.created_at,
           inviter_display_name:
             profileById(invite.invited_by)?.display_name ?? null,
         }))
@@ -331,7 +366,22 @@ export class MockDbRepository implements DbRepository {
     input: CreateCareSpaceInviteInput
   ): Promise<CareSpaceInvite> {
     careSpaceById(careSpaceId);
+    if (input.role !== "caregiver") {
+      throw new Error("가족 기록 관리 요청은 보호자 권한으로만 보낼 수 있습니다.");
+    }
     const email = input.email.trim().toLocaleLowerCase();
+    if (email === MOCK_USER_EMAIL) {
+      throw new Error("자기 자신에게 가족 기록 관리 요청을 보낼 수 없습니다.");
+    }
+    const ownerMembership = careSpaceMembers.find(
+      (member) =>
+        member.care_space_id === careSpaceId &&
+        member.user_id === MOCK_USER_ID &&
+        member.role === "owner"
+    );
+    if (!ownerMembership) {
+      throw new Error("복약 공간 소유자만 관리 요청을 보낼 수 있습니다.");
+    }
     if (
       careSpaceInvites.some(
         (invite) =>
@@ -340,7 +390,7 @@ export class MockDbRepository implements DbRepository {
           invite.status === "pending"
       )
     ) {
-      throw new Error("이미 대기 중인 가족 초대가 있습니다.");
+      throw new Error("이미 대기 중인 가족 기록 관리 요청이 있습니다.");
     }
 
     const timestamp = now();
@@ -349,6 +399,7 @@ export class MockDbRepository implements DbRepository {
       care_space_id: careSpaceId,
       email,
       role: input.role,
+      inviter_caregiver_care_space_id: null,
       status: "pending",
       invited_by: MOCK_USER_ID,
       accepted_by: null,
@@ -363,10 +414,33 @@ export class MockDbRepository implements DbRepository {
     return clone(invite);
   }
 
-  async acceptCareSpaceInvite(inviteId: string): Promise<CareSpaceMember> {
+  async acceptCareSpaceInvite(
+    inviteId: string,
+    inviterCaregiverCareSpaceId: string | null
+  ): Promise<CareSpaceMember> {
     const current = inviteById(inviteId);
+    if (
+      current.status === "accepted" &&
+      current.accepted_by === MOCK_USER_ID
+    ) {
+      if (
+        current.inviter_caregiver_care_space_id !==
+        inviterCaregiverCareSpaceId
+      ) {
+        throw new Error("이미 수락한 관리 대상 공간은 바꿀 수 없습니다.");
+      }
+      const acceptedMember = careSpaceMembers.find(
+        (candidate) =>
+          candidate.care_space_id === inviterCaregiverCareSpaceId &&
+          candidate.user_id === current.invited_by
+      );
+      if (!acceptedMember) {
+        throw new Error("수락된 보호자 권한을 확인하지 못했습니다.");
+      }
+      return clone(acceptedMember);
+    }
     if (current.status !== "pending") {
-      throw new Error("대기 중인 가족 초대가 아닙니다.");
+      throw new Error("대기 중인 가족 기록 관리 요청이 아닙니다.");
     }
     if (new Date(current.expires_at).getTime() <= Date.now()) {
       const timestamp = now();
@@ -376,7 +450,46 @@ export class MockDbRepository implements DbRepository {
         responded_at: timestamp,
         updated_at: timestamp,
       });
-      throw new Error("가족 초대가 만료되었습니다.");
+      throw new Error("가족 기록 관리 요청이 만료되었습니다.");
+    }
+    if (inviterCaregiverCareSpaceId === null) {
+      throw new Error("관리 대상으로 공유할 내 복약 공간을 선택해 주세요.");
+    }
+    if (current.role !== "caregiver") {
+      throw new Error("보호자 권한 관리 요청만 수락할 수 있습니다.");
+    }
+    if (current.email.toLocaleLowerCase() !== MOCK_USER_EMAIL) {
+      throw new Error("이 계정으로 받은 관리 요청이 아닙니다.");
+    }
+    if (current.invited_by === MOCK_USER_ID) {
+      throw new Error("자기 자신의 관리 요청은 수락할 수 없습니다.");
+    }
+    const requesterIsSourceOwner = careSpaceMembers.some(
+      (member) =>
+        member.care_space_id === current.care_space_id &&
+        member.user_id === current.invited_by &&
+        member.role === "owner"
+    );
+    if (!requesterIsSourceOwner) {
+      throw new Error("관리 요청을 보낸 소유자 권한을 확인할 수 없습니다.");
+    }
+    const ownerMembership = careSpaceMembers.find(
+      (member) =>
+        member.care_space_id === inviterCaregiverCareSpaceId &&
+        member.user_id === MOCK_USER_ID &&
+        member.role === "owner"
+    );
+    if (!ownerMembership) {
+      throw new Error("본인이 소유한 복약 공간만 공유할 수 있습니다.");
+    }
+    const requesterOwnsTarget = careSpaceMembers.some(
+      (member) =>
+        member.care_space_id === inviterCaregiverCareSpaceId &&
+        member.user_id === current.invited_by &&
+        member.role === "owner"
+    );
+    if (requesterOwnsTarget) {
+      throw new Error("이미 대상 공간을 소유한 사람에게 관리 권한을 줄 수 없습니다.");
     }
 
     const timestamp = now();
@@ -384,32 +497,42 @@ export class MockDbRepository implements DbRepository {
       ...current,
       status: "accepted",
       accepted_by: MOCK_USER_ID,
+      inviter_caregiver_care_space_id: inviterCaregiverCareSpaceId,
       responded_at: timestamp,
       updated_at: timestamp,
     });
     const existing = careSpaceMembers.find(
-      (member) =>
-        member.care_space_id === current.care_space_id &&
-        member.user_id === MOCK_USER_ID
+      (candidate) =>
+        candidate.care_space_id === inviterCaregiverCareSpaceId &&
+        candidate.user_id === current.invited_by
     );
-    if (existing) return clone(existing);
-
-    const member: CareSpaceMember = {
-      care_space_id: current.care_space_id,
-      user_id: MOCK_USER_ID,
-      role: current.role,
-      invited_by: current.invited_by,
-      created_at: timestamp,
-      updated_at: timestamp,
-    };
-    careSpaceMembers.push(member);
+    if (existing && existing.role !== "owner") {
+      existing.role = "caregiver";
+      existing.invited_by = MOCK_USER_ID;
+      existing.updated_at = timestamp;
+    } else if (!existing) {
+      careSpaceMembers.push({
+        care_space_id: inviterCaregiverCareSpaceId,
+        user_id: current.invited_by,
+        role: "caregiver",
+        invited_by: MOCK_USER_ID,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+    }
+    const member = careSpaceMembers.find(
+      (candidate) =>
+        candidate.care_space_id === inviterCaregiverCareSpaceId &&
+        candidate.user_id === current.invited_by
+    );
+    if (!member) throw new Error("보호자 권한을 추가하지 못했습니다.");
     return clone(member);
   }
 
   async declineCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite> {
     const current = inviteById(inviteId);
     if (current.status !== "pending") {
-      throw new Error("대기 중인 가족 초대가 아닙니다.");
+      throw new Error("대기 중인 가족 기록 관리 요청이 아닙니다.");
     }
     const timestamp = now();
     const updated: CareSpaceInvite = {
@@ -425,7 +548,7 @@ export class MockDbRepository implements DbRepository {
   async revokeCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite> {
     const current = inviteById(inviteId);
     if (current.status !== "pending") {
-      throw new Error("대기 중인 가족 초대가 아닙니다.");
+      throw new Error("대기 중인 가족 기록 관리 요청이 아닙니다.");
     }
     const timestamp = now();
     const updated: CareSpaceInvite = {

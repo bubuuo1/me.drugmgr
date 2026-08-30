@@ -11,7 +11,6 @@ import {
   FieldError,
   LoadingState,
   Notice,
-  PageHeader,
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import { AccountSettingsCard } from "@/app/settings/account-settings-card";
@@ -364,7 +363,7 @@ export default function SettingsPage() {
   if (loading && medications.length === 0) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="환경설정" />
+        <h1 className="sr-only">환경설정</h1>
         <AccountSettingsCard />
         <LoadingState label="약 설정을 불러오는 중입니다." />
       </main>
@@ -374,7 +373,7 @@ export default function SettingsPage() {
   if (error && !selectedCareSpace) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="환경설정" />
+        <h1 className="sr-only">환경설정</h1>
         <ErrorBanner message={error} onRetry={refresh} />
       </main>
     );
@@ -383,7 +382,7 @@ export default function SettingsPage() {
   if (!canManageMedicationSettings) {
     return (
       <main className="flex flex-1 flex-col gap-7">
-        <PageHeader title="환경설정" />
+        <h1 className="sr-only">환경설정</h1>
         <AccountSettingsCard />
         <PushNotificationsCard online={online} />
         <ErrorBanner
@@ -457,7 +456,7 @@ export default function SettingsPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-7">
-      <PageHeader title="환경설정" />
+      <h1 className="sr-only">환경설정</h1>
 
       <AccountSettingsCard />
       <PushNotificationsCard online={online} />

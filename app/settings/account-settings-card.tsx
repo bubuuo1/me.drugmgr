@@ -267,7 +267,7 @@ export function AccountSettingsCard() {
         <span>가족 관리</span>
         {pendingCareSpaceInvites.length > 0 && (
           <span className="rounded-full bg-surface-soft px-3 py-1 text-sm text-primary-active">
-            받은 초대 {pendingCareSpaceInvites.length}개
+            받은 관리 요청 {pendingCareSpaceInvites.length}개
           </span>
         )}
       </Link>

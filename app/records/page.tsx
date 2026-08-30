@@ -10,7 +10,6 @@ import {
   FieldError,
   LoadingState,
   Notice,
-  PageHeader,
 } from "@/app/components/ui";
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import {
@@ -238,7 +237,7 @@ export default function RecordsPage() {
   if (loading && !selectedCareSpace) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="복용기록 확인" />
+        <h1 className="sr-only">복용기록 확인</h1>
         <LoadingState label="투약 기록을 불러오는 중입니다." />
       </main>
     );
@@ -247,7 +246,7 @@ export default function RecordsPage() {
   if (error && !selectedCareSpace) {
     return (
       <main className="flex flex-1 flex-col gap-6">
-        <PageHeader title="복용기록 확인" />
+        <h1 className="sr-only">복용기록 확인</h1>
         <ErrorBanner message={error} onRetry={refresh} />
       </main>
     );
@@ -255,7 +254,7 @@ export default function RecordsPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-6">
-      <PageHeader title="복용기록 확인" />
+      <h1 className="sr-only">복용기록 확인</h1>
 
       <DateNavigator
         value={dateKey}

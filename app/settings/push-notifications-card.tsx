@@ -346,7 +346,7 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
         </h2>
         <p className="text-base leading-relaxed text-body">
           이 기기에서 알림을 받을 가족 공간을 각각 선택할 수 있습니다. 가족
-          초대를 수락해도 알림은 자동으로 켜지지 않습니다.
+          가족 기록 관리 요청을 수락해도 알림은 자동으로 켜지지 않습니다.
         </p>
         <p className="text-base leading-relaxed text-body">
           등록한 각 복용·알림 시간부터 5분마다 반복하고, 해당 시간의 기록이

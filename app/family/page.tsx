@@ -13,7 +13,6 @@ import {
 import { useOnlineStatus } from "@/app/components/use-online-status";
 import { useDb } from "@/lib/store";
 import type {
-  CareSpaceInviteRole,
   CareSpaceMemberWithProfile,
   CareSpaceRole,
 } from "@/lib/types";
@@ -36,12 +35,13 @@ function formattedExpiry(value: string): string {
 function errorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
-    : "가족 공유 요청을 처리하지 못했습니다.";
+    : "가족 기록 관리 요청을 처리하지 못했습니다.";
 }
 
 export default function FamilyPage() {
   const online = useOnlineStatus();
   const {
+    careSpaces,
     selectedCareSpace,
     careSpaceMembers,
     careSpaceInvites,
@@ -59,7 +59,12 @@ export default function FamilyPage() {
     removeCareSpaceMember,
   } = useDb();
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<CareSpaceInviteRole>("caregiver");
+  const [managedSpaceByInvite, setManagedSpaceByInvite] = useState<
+    Record<string, string>
+  >({});
+  const [managementConsentByInvite, setManagementConsentByInvite] = useState<
+    Record<string, boolean>
+  >({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -75,6 +80,10 @@ export default function FamilyPage() {
     () => careSpaceInvites.filter((invite) => invite.status === "pending"),
     [careSpaceInvites]
   );
+  const ownerCareSpaces = useMemo(
+    () => careSpaces.filter((space) => space.role === "owner"),
+    [careSpaces]
+  );
 
   async function submitInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,16 +93,19 @@ export default function FamilyPage() {
     setMessage(null);
     clearError();
     try {
-      const invite = await createCareSpaceInvite({ email, role });
+      const invite = await createCareSpaceInvite({
+        email,
+        role: "caregiver",
+      });
       setEmail("");
       const delivery = await sendCareSpaceInviteEmail(invite.id);
       if (delivery.ok) {
         setMessage(
-          `${invite.email} 주소로 초대 메일을 보냈습니다. 상대방이 같은 이메일의 Google 계정으로 로그인해 수락하면 가족으로 추가됩니다.`
+          `${invite.email} 주소로 복약 기록 관리 요청을 보냈습니다. 상대방이 자기 복약 공간을 선택하고 동의해 수락하면 내가 그 공간의 보호자로 추가됩니다.`
         );
       } else {
         setLocalError(
-          `초대는 저장했지만 ${delivery.message} 응답 대기 목록에서 다시 보낼 수 있습니다.`
+          `관리 요청은 저장했지만 ${delivery.message} 응답 대기 목록에서 다시 보낼 수 있습니다.`
         );
       }
     } catch (caught) {
@@ -105,18 +117,40 @@ export default function FamilyPage() {
 
   async function respondToInvite(inviteId: string, accept: boolean) {
     if (!online || pendingAction) return;
+    const managedCareSpaceId = managedSpaceByInvite[inviteId] ?? null;
+    if (
+      accept &&
+      (!managedCareSpaceId || !managementConsentByInvite[inviteId])
+    ) {
+      setLocalError(
+        "관리 대상으로 공유할 내 복약 공간을 선택하고 보호자 권한 공유에 동의해 주세요."
+      );
+      return;
+    }
     setPendingAction(inviteId);
     setLocalError(null);
     setMessage(null);
     clearError();
     try {
       if (accept) {
-        await acceptCareSpaceInvite(inviteId);
-        setMessage("가족 공간 초대를 수락했습니다.");
+        await acceptCareSpaceInvite(inviteId, managedCareSpaceId);
+        setMessage(
+          "복약 기록 관리 요청을 수락했습니다. 초대한 사람이 선택한 내 복약 공간을 보호자로 관리할 수 있습니다."
+        );
       } else {
         await declineCareSpaceInvite(inviteId);
-        setMessage("가족 공간 초대를 거절했습니다.");
+        setMessage("복약 기록 관리 요청을 거절했습니다.");
       }
+      setManagedSpaceByInvite((current) => {
+        const next = { ...current };
+        delete next[inviteId];
+        return next;
+      });
+      setManagementConsentByInvite((current) => {
+        const next = { ...current };
+        delete next[inviteId];
+        return next;
+      });
     } catch (caught) {
       setLocalError(errorMessage(caught));
     } finally {
@@ -132,7 +166,7 @@ export default function FamilyPage() {
     clearError();
     try {
       await revokeCareSpaceInvite(inviteId);
-      setMessage("대기 중인 초대를 취소했습니다.");
+      setMessage("대기 중인 관리 요청을 취소했습니다.");
     } catch (caught) {
       setLocalError(errorMessage(caught));
     } finally {
@@ -182,7 +216,7 @@ export default function FamilyPage() {
     return (
       <main className="flex flex-1 flex-col gap-6">
         <PageHeader
-          title="가족 공유"
+          title="가족 기록 관리"
           backHref="/settings"
           backLabel="환경설정"
         />
@@ -195,7 +229,7 @@ export default function FamilyPage() {
     return (
       <main className="flex flex-1 flex-col gap-6">
         <PageHeader
-          title="가족 공유"
+          title="가족 기록 관리"
           backHref="/settings"
           backLabel="환경설정"
         />
@@ -207,7 +241,7 @@ export default function FamilyPage() {
   return (
     <main className="flex flex-1 flex-col gap-7">
       <PageHeader
-        title="가족 공유"
+        title="가족 기록 관리"
         backHref="/settings"
         backLabel="환경설정"
       />
@@ -223,7 +257,7 @@ export default function FamilyPage() {
 
       {!online && (
         <Notice tone="warning">
-          인터넷 연결이 없어 초대를 처리할 수 없습니다.
+          인터넷 연결이 없어 관리 요청을 처리할 수 없습니다.
         </Notice>
       )}
       {message && <Notice tone="success">{message}</Notice>}
@@ -231,7 +265,7 @@ export default function FamilyPage() {
       {pendingCareSpaceInvites.length > 0 && (
         <section aria-labelledby="received-invites-title">
           <h2 id="received-invites-title" className="text-xl font-bold text-ink">
-            받은 초대
+            받은 관리 요청
           </h2>
           <ul className="mt-4 flex flex-col gap-3">
             {pendingCareSpaceInvites.map((invite) => (
@@ -240,18 +274,85 @@ export default function FamilyPage() {
                 className="rounded-2xl border border-hairline bg-canvas px-5 py-4"
               >
                 <p className="text-lg font-bold text-ink">
-                  {invite.care_space_name}
+                  복약 기록 관리 요청
                 </p>
                 <p className="mt-1 text-base text-body">
                   {invite.inviter_display_name
-                    ? `${invite.inviter_display_name} 님의 초대`
-                    : "가족 구성원의 초대"}
-                  {" · "}
-                  {roleLabel(invite.role)}
+                    ? `${invite.inviter_display_name} 님이 내 기록의 보호자 권한을 요청했습니다.`
+                    : "가족 구성원이 내 기록의 보호자 권한을 요청했습니다."}
                 </p>
                 <p className="mt-1 text-sm text-muted">
                   {formattedExpiry(invite.expires_at)}까지 수락 가능
                 </p>
+                <div className="mt-4 rounded-xl bg-surface-soft px-4 py-4">
+                    <p className="text-base font-bold text-ink">
+                      내 기록 보호자 권한 요청
+                    </p>
+                    <p className="mt-1 text-sm leading-relaxed text-body">
+                      수락하면 초대한 사람이 아래에서 선택한 내 복약 공간의
+                      보호자가 됩니다. 보호자는 약·일정·투약·상태 기록을
+                      조회하고 변경할 수 있습니다.
+                    </p>
+                    <label
+                      htmlFor={`managed-space-${invite.id}`}
+                      className="mt-4 block text-sm font-bold text-body"
+                    >
+                      관리 대상으로 공유할 내 복약 공간
+                    </label>
+                    <select
+                      id={`managed-space-${invite.id}`}
+                      value={managedSpaceByInvite[invite.id] ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setManagedSpaceByInvite((current) => ({
+                          ...current,
+                          [invite.id]: value,
+                        }));
+                        setManagementConsentByInvite((current) => ({
+                          ...current,
+                          [invite.id]: false,
+                        }));
+                      }}
+                      disabled={!online || pendingAction !== null}
+                      className="mt-2 min-h-12 w-full rounded-xl border border-hairline bg-canvas px-3 text-base text-ink disabled:bg-surface-strong"
+                    >
+                      <option value="">내 공간 선택</option>
+                      {ownerCareSpaces.map((space) => (
+                        <option key={space.id} value={space.id}>
+                          {space.name}
+                        </option>
+                      ))}
+                    </select>
+                    {ownerCareSpaces.length === 0 && (
+                      <div className="mt-2">
+                        <FieldError>
+                          공유할 수 있는 본인 소유 복약 공간이 없습니다.
+                        </FieldError>
+                      </div>
+                    )}
+                    <label className="mt-4 flex items-start gap-3 text-sm leading-relaxed text-body">
+                      <input
+                        type="checkbox"
+                        checked={managementConsentByInvite[invite.id] ?? false}
+                        onChange={(event) =>
+                          setManagementConsentByInvite((current) => ({
+                            ...current,
+                            [invite.id]: event.target.checked,
+                          }))
+                        }
+                        disabled={
+                          !online ||
+                          pendingAction !== null ||
+                          !managedSpaceByInvite[invite.id]
+                        }
+                        className="mt-1 size-5 shrink-0 accent-primary-active"
+                      />
+                      <span>
+                        선택한 공간의 복약 기록 관리 권한을 초대한 사람에게
+                        공유하는 데 동의합니다.
+                      </span>
+                    </label>
+                  </div>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -263,11 +364,18 @@ export default function FamilyPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={!online || pendingAction !== null}
+                    disabled={
+                      !online ||
+                      pendingAction !== null ||
+                      !managedSpaceByInvite[invite.id] ||
+                      !managementConsentByInvite[invite.id]
+                    }
                     onClick={() => void respondToInvite(invite.id, true)}
                     className="min-h-12 rounded-full bg-primary-active px-4 text-base font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
                   >
-                    {pendingAction === invite.id ? "처리 중" : "수락"}
+                    {pendingAction === invite.id
+                      ? "처리 중"
+                      : "동의하고 수락"}
                   </button>
                 </div>
               </li>
@@ -329,18 +437,20 @@ export default function FamilyPage() {
               className="rounded-2xl border border-hairline bg-canvas px-5 py-5"
             >
               <h2 id="invite-title" className="text-xl font-bold text-ink">
-                가족 초대
+                가족 기록 관리 요청
               </h2>
               <p className="mt-2 text-base leading-relaxed text-body">
                 Gmail·네이버 등 메일을 받을 주소를 입력하세요. 상대방은 같은
-                주소로 만든 Google 계정으로 로그인한 뒤 직접 수락해야 합니다.
+                주소로 만든 Google 계정으로 로그인해 자기 복약 공간을 직접
+                선택하고 동의해야 합니다. 수락 전에는 상대방 기록을 볼 수
+                없습니다.
               </p>
               <form className="mt-5 flex flex-col gap-4" onSubmit={submitInvite}>
                 <label
                   htmlFor="family-invite-email"
                   className="text-base font-bold text-body"
                 >
-                  초대할 이메일
+                  관리 요청을 보낼 이메일
                 </label>
                 <input
                   id="family-invite-email"
@@ -353,24 +463,11 @@ export default function FamilyPage() {
                   disabled={pendingAction !== null}
                   className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink disabled:bg-surface-soft"
                 />
-                <label
-                  htmlFor="family-invite-role"
-                  className="text-base font-bold text-body"
-                >
-                  권한
-                </label>
-                <select
-                  id="family-invite-role"
-                  value={role}
-                  onChange={(event) =>
-                    setRole(event.target.value as CareSpaceInviteRole)
-                  }
-                  disabled={pendingAction !== null}
-                  className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink disabled:bg-surface-soft"
-                >
-                  <option value="caregiver">보호자 · 기록·투약 설정 가능</option>
-                  <option value="viewer">조회 전용</option>
-                </select>
+                <Notice>
+                  상대방이 수락하면 나는 선택된 공간의 보호자가 되어 약·일정과
+                  투약·상태 기록을 조회하고 변경할 수 있습니다. 상대방은 내
+                  공간에 자동으로 추가되지 않습니다.
+                </Notice>
                 {!online && (
                   <FieldError>연결 후 초대를 만들 수 있습니다.</FieldError>
                 )}
@@ -379,7 +476,9 @@ export default function FamilyPage() {
                   disabled={!online || pendingAction !== null}
                   className="min-h-14 rounded-xl bg-primary-active px-5 text-lg font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
                 >
-                  {pendingAction === "invite" ? "초대 보내는 중" : "초대 메일 보내기"}
+                  {pendingAction === "invite"
+                    ? "요청 보내는 중"
+                    : "관리 요청 메일 보내기"}
                 </button>
               </form>
 
@@ -394,7 +493,10 @@ export default function FamilyPage() {
                             {invite.email}
                           </p>
                           <p className="text-sm text-muted">
-                            {roleLabel(invite.role)} · {formattedExpiry(invite.expires_at)}까지
+                            보호자 권한 요청 · {formattedExpiry(invite.expires_at)}까지
+                          </p>
+                          <p className="mt-1 text-sm text-body">
+                            상대방이 자기 복약 공간을 선택하고 동의하면 관리 가능
                           </p>
                         </div>
                         <div className="mt-3 grid gap-2 min-[360px]:grid-cols-2">
@@ -414,7 +516,7 @@ export default function FamilyPage() {
                             onClick={() => void revokeInvite(invite.id)}
                             className="min-h-12 rounded-full border border-hairline bg-canvas px-3 text-sm font-bold text-body disabled:bg-surface-strong"
                           >
-                            {pendingAction === invite.id ? "처리 중" : "초대 취소"}
+                            {pendingAction === invite.id ? "처리 중" : "요청 취소"}
                           </button>
                         </div>
                       </li>

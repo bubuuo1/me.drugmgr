@@ -260,10 +260,16 @@ test("주요 메뉴와 환경설정 하위 화면은 방문 기록을 불필요�
     .getByRole("link", { name: "복용기록", exact: true })
     .click();
   await expect(page).toHaveURL(/\/records$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "복용기록 확인" })
+  ).toHaveClass(/sr-only/);
   await navigation
     .getByRole("link", { name: "환경설정", exact: true })
     .click();
   await expect(page).toHaveURL(/\/settings$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "환경설정" })
+  ).toHaveClass(/sr-only/);
   await navigation
     .getByRole("link", { name: "첫 화면", exact: true })
     .click();
@@ -290,7 +296,7 @@ test("주요 메뉴와 환경설정 하위 화면은 방문 기록을 불필요�
     .toBe(initialHistoryLength);
 });
 
-test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 있다", async ({
+test("가족 기록 관리 요청을 보내고 명시적으로 동의해 수락할 수 있다", async ({
   page,
 }) => {
   await page.goto("/settings");
@@ -329,7 +335,7 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
     .click();
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "가족 공유" })
+    page.getByRole("heading", { level: 1, name: "가족 기록 관리" })
   ).toBeVisible();
   await expect(
     page.locator("main header").getByRole("link", {
@@ -355,18 +361,76 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
 
   const inviteEmail = `family-${runSuffix}@example.com`;
   await page
-    .getByLabel("초대할 이메일", { exact: true })
+    .getByLabel("관리 요청을 보낼 이메일", { exact: true })
     .fill(inviteEmail);
-  await page.getByLabel("권한", { exact: true }).selectOption("viewer");
   await page
-    .getByRole("button", { name: "초대 메일 보내기", exact: true })
+    .getByRole("button", { name: "관리 요청 메일 보내기", exact: true })
     .click();
 
   await expect(
-    page.getByText(new RegExp(`${inviteEmail} 주소로 초대 메일을 보냈습니다`))
+    page.getByText(new RegExp(`${inviteEmail} 주소로 복약 기록 관리 요청을 보냈습니다`))
   ).toBeVisible();
   const inviteRow = page.getByRole("listitem").filter({ hasText: inviteEmail });
-  await expect(inviteRow).toContainText("조회 전용");
+  await expect(inviteRow).toContainText("보호자 권한 요청");
+
+  await page
+    .getByLabel("관리 요청을 보낼 이메일", { exact: true })
+    .fill("mock@example.com");
+  await page
+    .getByRole("button", { name: "관리 요청 메일 보내기", exact: true })
+    .click();
+  await expect(
+    page.getByText("자기 자신에게 가족 기록 관리 요청을 보낼 수 없습니다.", {
+      exact: true,
+    })
+  ).toBeVisible();
+
+  const receivedRequest = page
+    .getByRole("listitem")
+    .filter({ hasText: "내 기록 보호자 권한 요청" });
+  const acceptButton = receivedRequest.getByRole("button", {
+    name: "동의하고 수락",
+    exact: true,
+  });
+  await expect(acceptButton).toBeDisabled();
+  await receivedRequest
+    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .selectOption("mock-care-space");
+  await receivedRequest
+    .getByRole("checkbox", {
+      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+    })
+    .check();
+  await expect(acceptButton).toBeEnabled();
+  await receivedRequest
+    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .selectOption("");
+  await expect(acceptButton).toBeDisabled();
+  await receivedRequest
+    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .selectOption("mock-care-space");
+  await expect(
+    receivedRequest.getByRole("checkbox", {
+      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+    })
+  ).not.toBeChecked();
+  await expect(acceptButton).toBeDisabled();
+  await receivedRequest
+    .getByRole("checkbox", {
+      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+    })
+    .check();
+  await acceptButton.click();
+  await expect(
+    page.getByText("복약 기록 관리 요청을 수락했습니다.", { exact: false })
+  ).toBeVisible();
+  const acceptedCaregiver = page
+    .getByRole("listitem")
+    .filter({ hasText: "초대한 가족" });
+  await expect(acceptedCaregiver).toContainText("보호자");
+  await expect(page.getByText("요청자 비공개 공간", { exact: true })).toHaveCount(
+    0
+  );
 });
 
 test("보호자는 가족 구성원을 확인하고 약과 임의 시각을 설정할 수 있다", async ({
@@ -397,7 +461,11 @@ test("보호자는 가족 구성원을 확인하고 약과 임의 시각을 설�
   ).toBeVisible();
   await expect(membersSection.getByText("소유자", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("heading", { level: 2, name: "가족 초대", exact: true })
+    page.getByRole("heading", {
+      level: 2,
+      name: "가족 기록 관리 요청",
+      exact: true,
+    })
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "접근 제거", exact: true })
@@ -837,7 +905,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await page.goto("/settings");
   await expect(
     page.getByRole("heading", { level: 1, name: "환경설정" })
-  ).toBeVisible();
+  ).toHaveClass(/sr-only/);
   await expect(
     page.locator("main header").getByRole("link", {
       name: "첫 화면으로 이동",

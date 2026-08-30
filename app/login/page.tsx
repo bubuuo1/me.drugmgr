@@ -46,14 +46,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </h1>
         <p className="mt-4 text-lg leading-relaxed text-body">
           Google 계정으로 로그인하면 개인 복약 기록은 사용자별로 분리되고,
-          초대한 가족과 필요한 기록을 함께 확인할 수 있습니다.
+          내가 권한을 공유한 가족과 필요한 기록을 함께 확인할 수 있습니다.
         </p>
 
         <LoginButton nextPath={nextPath} />
 
         <p className="mt-5 text-sm leading-relaxed text-muted">
-          처음 로그인하는 Google 계정은 회원으로 등록됩니다. 가족 기록은 초대를
-          수락한 뒤에만 볼 수 있습니다.
+          처음 로그인하는 Google 계정은 회원으로 등록됩니다. 가족 기록은 기록
+          소유자가 관리 요청에 동의해 권한을 준 계정만 볼 수 있습니다.
         </p>
 
         <aside

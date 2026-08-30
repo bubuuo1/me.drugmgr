@@ -180,7 +180,7 @@ export class SupabaseDbRepository implements DbRepository {
       "get_pending_care_space_invites",
       {}
     );
-    if (error) throw failure("받은 가족 초대 조회", error);
+    if (error) throw failure("받은 가족 기록 관리 요청 조회", error);
     return data;
   }
 
@@ -204,7 +204,7 @@ export class SupabaseDbRepository implements DbRepository {
       .select("*")
       .eq("care_space_id", careSpaceId)
       .order("created_at", { ascending: false });
-    if (error) throw failure("가족 초대 내역 조회", error);
+    if (error) throw failure("가족 기록 관리 요청 내역 조회", error);
     return data;
   }
 
@@ -223,16 +223,22 @@ export class SupabaseDbRepository implements DbRepository {
           : { p_expires_at: input.expires_at }),
       }
     );
-    if (error) throw failure("가족 초대 생성", error);
+    if (error) throw failure("가족 기록 관리 요청 생성", error);
     return data;
   }
 
-  async acceptCareSpaceInvite(inviteId: string): Promise<CareSpaceMember> {
+  async acceptCareSpaceInvite(
+    inviteId: string,
+    inviterCaregiverCareSpaceId: string | null
+  ): Promise<CareSpaceMember> {
     const { data, error } = await requireSupabase().rpc(
       "accept_care_space_invite",
-      { p_invite_id: inviteId }
+      {
+        p_invite_id: inviteId,
+        p_inviter_caregiver_care_space_id: inviterCaregiverCareSpaceId,
+      }
     );
-    if (error) throw failure("가족 초대 수락", error);
+    if (error) throw failure("가족 기록 관리 요청 수락", error);
     return data;
   }
 
@@ -241,7 +247,7 @@ export class SupabaseDbRepository implements DbRepository {
       "decline_care_space_invite",
       { p_invite_id: inviteId }
     );
-    if (error) throw failure("가족 초대 거절", error);
+    if (error) throw failure("가족 기록 관리 요청 거절", error);
     return data;
   }
 
@@ -250,7 +256,7 @@ export class SupabaseDbRepository implements DbRepository {
       "revoke_care_space_invite",
       { p_invite_id: inviteId }
     );
-    if (error) throw failure("가족 초대 취소", error);
+    if (error) throw failure("가족 기록 관리 요청 취소", error);
     return data;
   }
 

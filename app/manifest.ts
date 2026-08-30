@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "투약 관리",
     short_name: "투약관리",
-    description: "본인과 초대한 가족이 복약 기록과 알림을 안전하게 공유하는 앱",
+    description: "본인과 권한을 공유한 가족이 복약 기록과 알림을 안전하게 관리하는 앱",
     id: "/",
     start_url: "/",
     scope: "/",
