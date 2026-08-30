@@ -2,6 +2,7 @@ import type {
   AddMedicationInput,
   AddMedicationLogInput,
   AddScheduleInput,
+  CareSpace,
   CareSpaceAccess,
   CareSpaceInvite,
   CareSpaceMember,
@@ -21,6 +22,7 @@ import type {
 
 export interface DbRepository {
   fetchCareSpaces(): Promise<CareSpaceAccess[]>;
+  updateCareSpace(careSpaceId: string, name: string): Promise<CareSpace>;
   fetchPendingCareSpaceInvites(): Promise<PendingCareSpaceInvite[]>;
   fetchCareSpaceMembers(
     careSpaceId: string

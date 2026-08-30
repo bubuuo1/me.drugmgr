@@ -165,7 +165,6 @@ export type AddMedicationLogInput = {
 export type UpdateMedicationLogInput = Partial<
   Pick<
     MedicationLog,
-    | "medication_id"
     | "schedule_id"
     | "taken_at"
     | "quantity"
@@ -311,7 +310,6 @@ type MedicationLogInsert = Pick<
 type MedicationLogUpdate = Partial<
   Pick<
     MedicationLog,
-    | "medication_id"
     | "schedule_id"
     | "taken_at"
     | "quantity"
@@ -495,6 +493,18 @@ export type Database = {
       soft_delete_medication: {
         Args: { p_care_space_id: string; p_medication_id: string };
         Returns: Medication;
+      };
+      upsert_daily_status: {
+        Args: {
+          p_breathing: string | null;
+          p_care_space_id: string;
+          p_date: string;
+          p_eye_symptom: string | null;
+          p_fatigue: string | null;
+          p_note: string | null;
+          p_strength: string | null;
+        };
+        Returns: DailyStatus;
       };
       get_pending_care_space_invites: {
         Args: Record<string, never>;

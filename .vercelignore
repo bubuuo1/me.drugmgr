@@ -1,0 +1,15 @@
+/.git/
+/.next/
+/.next-e2e/
+/node_modules/
+/coverage/
+/test-results/
+/playwright-report/
+/out/
+/build/
+/.vercel/
+/.env*
+/supabase/.temp/
+*.tsbuildinfo
+next-env.d.ts
+start-opencode-web.bat

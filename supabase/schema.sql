@@ -25,6 +25,7 @@ drop function if exists private.push_dispatch_secret_matches(text) cascade;
 drop function if exists private.push_delivery_is_sendable(uuid, timestamptz) cascade;
 drop function if exists private.is_care_space_member(uuid) cascade;
 drop function if exists private.is_care_space_owner(uuid) cascade;
+drop function if exists private.can_manage_medication_settings(uuid) cascade;
 drop function if exists private.can_mutate_care_records(uuid) cascade;
 drop function if exists private.shares_care_space(uuid) cascade;
 drop function if exists private.is_verified_invite_recipient(text) cascade;
@@ -38,6 +39,9 @@ drop function if exists public.decline_care_space_invite(uuid) cascade;
 drop function if exists public.revoke_care_space_invite(uuid) cascade;
 drop function if exists public.remove_care_space_member(uuid, uuid) cascade;
 drop function if exists public.soft_delete_medication(uuid, uuid) cascade;
+drop function if exists public.upsert_daily_status(
+  uuid, date, text, text, text, text, text
+) cascade;
 drop function if exists public.claim_care_space_invite_email_send(uuid) cascade;
 drop function if exists public.claim_care_space_invite_email_send(text, uuid) cascade;
 drop function if exists public.register_push_subscription(text, text, text, timestamptz) cascade;
@@ -348,6 +352,13 @@ create table public.daily_status (
   ),
   constraint daily_status_note_valid check (
     note is null or char_length(note) <= 2000
+  ),
+  constraint daily_status_has_content check (
+    fatigue is not null
+    or strength is not null
+    or breathing is not null
+    or eye_symptom is not null
+    or (note is not null and note ~ '[^[:space:]]')
   )
 );
 
@@ -550,6 +561,24 @@ as $$
   );
 $$;
 
+create or replace function private.can_manage_medication_settings(
+  p_care_space_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (select auth.uid()) is not null and exists (
+    select 1
+      from public.care_space_members as member
+      where member.care_space_id = p_care_space_id
+        and member.user_id = (select auth.uid())
+        and member.role in ('owner', 'caregiver')
+  );
+$$;
+
 create or replace function private.shares_care_space(p_other_user_id uuid)
 returns boolean
 language sql
@@ -726,12 +755,8 @@ begin
       raise check_violation using message = 'log without schedule_id must be extra';
     end if;
     new.schedule_time := null;
-  elsif new.schedule_id is distinct from old.schedule_id then
-    if new.is_extra then
-      new.schedule_time := null;
-    else
-      new.schedule_time := old.schedule_time;
-    end if;
+  elsif new.is_extra then
+    new.schedule_time := null;
   else
     new.schedule_time := old.schedule_time;
   end if;
@@ -872,6 +897,8 @@ revoke all on function private.is_care_space_owner(uuid)
   from public, anon, authenticated;
 revoke all on function private.can_mutate_care_records(uuid)
   from public, anon, authenticated;
+revoke all on function private.can_manage_medication_settings(uuid)
+  from public, anon, authenticated;
 revoke all on function private.shares_care_space(uuid)
   from public, anon, authenticated;
 revoke all on function private.set_audit_actor()
@@ -883,6 +910,8 @@ revoke all on function private.handle_medicine_app_new_user()
 grant execute on function private.is_care_space_member(uuid) to authenticated;
 grant execute on function private.is_care_space_owner(uuid) to authenticated;
 grant execute on function private.can_mutate_care_records(uuid) to authenticated;
+grant execute on function private.can_manage_medication_settings(uuid)
+  to authenticated;
 grant execute on function private.shares_care_space(uuid) to authenticated;
 
 alter table public.profiles enable row level security;
@@ -932,13 +961,13 @@ create policy care_space_invites_owner_select
 create policy medications_member_select
   on public.medications for select to authenticated
   using ((select private.is_care_space_member(care_space_id)));
-create policy medications_owner_insert
+create policy medications_manager_insert
   on public.medications for insert to authenticated
-  with check ((select private.is_care_space_owner(care_space_id)));
-create policy medications_owner_update
+  with check ((select private.can_manage_medication_settings(care_space_id)));
+create policy medications_manager_update
   on public.medications for update to authenticated
-  using ((select private.is_care_space_owner(care_space_id)))
-  with check ((select private.is_care_space_owner(care_space_id)));
+  using ((select private.can_manage_medication_settings(care_space_id)))
+  with check ((select private.can_manage_medication_settings(care_space_id)));
 
 create policy medication_schedules_member_select
   on public.medication_schedules for select to authenticated
@@ -952,10 +981,10 @@ create policy medication_schedules_member_select
           and medication.deleted_at is null
     )
   );
-create policy medication_schedules_owner_insert
+create policy medication_schedules_manager_insert
   on public.medication_schedules for insert to authenticated
   with check (
-    (select private.is_care_space_owner(care_space_id))
+    (select private.can_manage_medication_settings(care_space_id))
     and exists (
       select 1
         from public.medications as medication
@@ -964,11 +993,11 @@ create policy medication_schedules_owner_insert
           and medication.deleted_at is null
     )
   );
-create policy medication_schedules_owner_update
+create policy medication_schedules_manager_update
   on public.medication_schedules for update to authenticated
-  using ((select private.is_care_space_owner(care_space_id)))
+  using ((select private.can_manage_medication_settings(care_space_id)))
   with check (
-    (select private.is_care_space_owner(care_space_id))
+    (select private.can_manage_medication_settings(care_space_id))
     and exists (
       select 1
         from public.medications as medication
@@ -977,9 +1006,9 @@ create policy medication_schedules_owner_update
           and medication.deleted_at is null
     )
   );
-create policy medication_schedules_owner_delete
+create policy medication_schedules_manager_delete
   on public.medication_schedules for delete to authenticated
-  using ((select private.is_care_space_owner(care_space_id)));
+  using ((select private.can_manage_medication_settings(care_space_id)));
 
 create policy medication_logs_member_select
   on public.medication_logs for select to authenticated
@@ -1039,7 +1068,7 @@ grant select on table public.care_space_invites to authenticated;
 grant select on table public.medications to authenticated;
 grant insert (care_space_id, name, unit, active, quantity_options)
   on table public.medications to authenticated;
-grant update (name, unit, active, deleted_at, quantity_options)
+grant update (name, unit, active, quantity_options)
   on table public.medications to authenticated;
 
 grant select on table public.medication_schedules to authenticated;
@@ -1061,7 +1090,6 @@ grant insert (
   is_extra
 ) on table public.medication_logs to authenticated;
 grant update (
-  medication_id,
   schedule_id,
   taken_at,
   quantity,
@@ -1080,7 +1108,7 @@ grant insert (
   eye_symptom,
   note
 ) on table public.daily_status to authenticated;
-grant update (date, fatigue, strength, breathing, eye_symptom, note)
+grant update (fatigue, strength, breathing, eye_symptom, note)
   on table public.daily_status to authenticated;
 grant delete on table public.daily_status to authenticated;
 
@@ -1446,7 +1474,7 @@ create or replace function public.soft_delete_medication(
 )
 returns public.medications
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -1455,8 +1483,8 @@ begin
   if (select auth.uid()) is null then
     raise insufficient_privilege using message = 'authentication required';
   end if;
-  if not private.is_care_space_owner(p_care_space_id) then
-    raise insufficient_privilege using message = 'care space owner required';
+  if not private.can_manage_medication_settings(p_care_space_id) then
+    raise insufficient_privilege using message = 'medication manager required';
   end if;
 
   select medication.* into selected_medication
@@ -1487,6 +1515,63 @@ begin
 end;
 $$;
 
+create or replace function public.upsert_daily_status(
+  p_care_space_id uuid,
+  p_date date,
+  p_fatigue text,
+  p_strength text,
+  p_breathing text,
+  p_eye_symptom text,
+  p_note text
+)
+returns public.daily_status
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller_id uuid := (select auth.uid());
+  selected_status public.daily_status;
+begin
+  if caller_id is null then
+    raise insufficient_privilege using message = 'authentication required';
+  end if;
+  if p_care_space_id is null or p_date is null then
+    raise not_null_violation using message = 'care space and date are required';
+  end if;
+  if not private.can_mutate_care_records(p_care_space_id) then
+    raise insufficient_privilege using message = 'care record writer required';
+  end if;
+
+  insert into public.daily_status (
+    care_space_id,
+    date,
+    fatigue,
+    strength,
+    breathing,
+    eye_symptom,
+    note
+  ) values (
+    p_care_space_id,
+    p_date,
+    p_fatigue,
+    p_strength,
+    p_breathing,
+    p_eye_symptom,
+    p_note
+  )
+  on conflict (care_space_id, date) do update
+    set fatigue = excluded.fatigue,
+        strength = excluded.strength,
+        breathing = excluded.breathing,
+        eye_symptom = excluded.eye_symptom,
+        note = excluded.note
+  returning * into selected_status;
+
+  return selected_status;
+end;
+$$;
+
 revoke all on function public.create_care_space_invite(uuid, text, text, timestamptz)
   from public, anon, authenticated;
 revoke all on function public.get_pending_care_space_invites()
@@ -1501,6 +1586,9 @@ revoke all on function public.remove_care_space_member(uuid, uuid)
   from public, anon, authenticated;
 revoke all on function public.soft_delete_medication(uuid, uuid)
   from public, anon, authenticated;
+revoke all on function public.upsert_daily_status(
+  uuid, date, text, text, text, text, text
+) from public, anon, authenticated;
 grant execute on function public.create_care_space_invite(uuid, text, text, timestamptz)
   to authenticated;
 grant execute on function public.get_pending_care_space_invites()
@@ -1512,6 +1600,9 @@ grant execute on function public.remove_care_space_member(uuid, uuid)
   to authenticated;
 grant execute on function public.soft_delete_medication(uuid, uuid)
   to authenticated;
+grant execute on function public.upsert_daily_status(
+  uuid, date, text, text, text, text, text
+) to authenticated;
 
 create or replace function private.push_dispatch_secret_matches(p_secret text)
 returns boolean

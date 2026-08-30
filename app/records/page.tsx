@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { DateTimePicker } from "@/app/components/date-time-picker";
 import { DateNavigator } from "@/app/components/date-navigator";
 import {
   ConfirmDialog,
@@ -22,11 +23,14 @@ import {
 import { useDb } from "@/lib/store";
 import type { MedicationLog } from "@/lib/types";
 
+const PRESERVED_SCHEDULE_SELECTION = "__preserved_schedule__";
+
 type EditDraft = {
   quantity: string;
   takenAt: string;
   note: string;
   scheduleId: string;
+  originalScheduleId: string;
 };
 
 type UndoState = { id: string; label: string };
@@ -76,6 +80,7 @@ export default function RecordsPage() {
     takenAt: "",
     note: "",
     scheduleId: "",
+    originalScheduleId: "",
   });
   const [confirmDelete, setConfirmDelete] = useState<MedicationLog | null>(null);
   const [undo, setUndo] = useState<UndoState | null>(null);
@@ -126,12 +131,16 @@ export default function RecordsPage() {
   }
 
   function startEdit(log: MedicationLog) {
+    const scheduleId =
+      log.schedule_id ??
+      (log.is_extra ? "" : PRESERVED_SCHEDULE_SELECTION);
     setEditId(log.id);
     setEditDraft({
       quantity: String(log.quantity),
       takenAt: formatKstDateTimeInput(log.taken_at),
       note: log.note ?? "",
-      scheduleId: log.schedule_id ?? "",
+      scheduleId,
+      originalScheduleId: scheduleId,
     });
     setFieldError(null);
     setSuccess(null);
@@ -159,12 +168,19 @@ export default function RecordsPage() {
     setSuccess(null);
     clearError();
     try {
+      const classificationPatch =
+        editDraft.scheduleId === editDraft.originalScheduleId ||
+        editDraft.scheduleId === PRESERVED_SCHEDULE_SELECTION
+          ? {}
+          : {
+              schedule_id: editDraft.scheduleId || null,
+              is_extra: editDraft.scheduleId === "",
+            };
       await updateLog(log.id, {
         quantity,
         taken_at: takenAtIso,
         note: editDraft.note.trim() || null,
-        schedule_id: editDraft.scheduleId || null,
-        is_extra: editDraft.scheduleId === "",
+        ...classificationPatch,
       });
       setEditId(null);
       setSuccess(
@@ -318,6 +334,8 @@ export default function RecordsPage() {
                   const missingCurrentSchedule =
                     log.schedule_id !== null &&
                     !schedules.some((schedule) => schedule.id === log.schedule_id);
+                  const preservingDeletedSchedule =
+                    log.schedule_id === null && !log.is_extra;
 
                   return (
                     <li
@@ -408,21 +426,19 @@ export default function RecordsPage() {
                               />
                             </label>
                           )}
-                          <label className="flex flex-col gap-2 text-base font-bold text-body">
-                            실제 복용 시각
-                            <input
-                              type="datetime-local"
-                              value={editDraft.takenAt}
-                              onChange={(event) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  takenAt: event.target.value,
-                                })
-                              }
-                              disabled={pendingKey !== null}
-                              className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
-                            />
-                          </label>
+                          <DateTimePicker
+                            id={`edit-taken-at-${log.id}`}
+                            value={editDraft.takenAt}
+                            label="실제 복용 시각"
+                            onChange={(value) =>
+                              setEditDraft({
+                                ...editDraft,
+                                takenAt: value,
+                              })
+                            }
+                            disabled={pendingKey !== null}
+                            className="[&_legend]:text-base [&_legend]:text-body"
+                          />
                           <label className="flex flex-col gap-2 text-base font-bold text-body">
                             일정 연결
                             <select
@@ -436,6 +452,14 @@ export default function RecordsPage() {
                               disabled={pendingKey !== null}
                               className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
                             >
+                              {preservingDeletedSchedule && (
+                                <option value={PRESERVED_SCHEDULE_SELECTION}>
+                                  기존 일정 기록 유지
+                                  {log.schedule_time
+                                    ? ` · 예정 ${log.schedule_time}`
+                                    : ""}
+                                </option>
+                              )}
                               <option value="">추가 복용 기록</option>
                               {missingCurrentSchedule && log.schedule_id && (
                                 <option value={log.schedule_id}>
@@ -461,7 +485,7 @@ export default function RecordsPage() {
                                 })
                               }
                               disabled={pendingKey !== null}
-                              maxLength={500}
+                              maxLength={2000}
                               rows={3}
                               className="min-h-28 rounded-xl border border-hairline bg-canvas px-4 py-3 text-lg font-normal text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
                             />

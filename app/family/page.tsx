@@ -20,7 +20,7 @@ import type {
 
 function roleLabel(role: CareSpaceRole): string {
   if (role === "owner") return "소유자";
-  if (role === "caregiver") return "보호자 · 기록 가능";
+  if (role === "caregiver") return "보호자 · 기록·투약 설정 가능";
   return "조회 전용";
 }
 
@@ -46,7 +46,7 @@ export default function FamilyPage() {
     careSpaceMembers,
     careSpaceInvites,
     pendingCareSpaceInvites,
-    canManageSettings,
+    canManageFamily,
     loading,
     error,
     clearError,
@@ -272,8 +272,9 @@ export default function FamilyPage() {
               {selectedCareSpace.name} 구성원
             </h2>
             <p className="mt-2 text-base leading-relaxed text-body">
-              소유자는 약·일정과 가족을 관리하고, 보호자는 투약·상태 기록을
-              함께 작성할 수 있습니다. 조회 전용 구성원은 기록만 봅니다.
+              소유자는 가족과 초대를 관리합니다. 보호자는 이 공간의 정보와
+              기록을 보고 약·일정을 함께 설정할 수 있습니다. 조회 전용
+              구성원은 정보와 기록만 봅니다.
             </p>
             {careSpaceMembers.length === 0 && loading ? (
               <div className="mt-4">
@@ -292,7 +293,7 @@ export default function FamilyPage() {
                       </p>
                       <p className="text-base text-body">{roleLabel(member.role)}</p>
                     </div>
-                    {canManageSettings && member.role !== "owner" && (
+                    {canManageFamily && member.role !== "owner" && (
                       <button
                         type="button"
                         disabled={!online || pendingAction !== null}
@@ -308,7 +309,7 @@ export default function FamilyPage() {
             )}
           </section>
 
-          {canManageSettings && (
+          {canManageFamily && (
             <section
               aria-labelledby="invite-title"
               className="rounded-2xl border border-hairline bg-canvas px-5 py-5"
@@ -353,7 +354,7 @@ export default function FamilyPage() {
                   disabled={pendingAction !== null}
                   className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink disabled:bg-surface-soft"
                 >
-                  <option value="caregiver">보호자 · 기록 가능</option>
+                  <option value="caregiver">보호자 · 기록·투약 설정 가능</option>
                   <option value="viewer">조회 전용</option>
                 </select>
                 {!online && (

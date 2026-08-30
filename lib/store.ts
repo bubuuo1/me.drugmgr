@@ -243,7 +243,19 @@ function validateStatus(input: DailyStatusInput): DailyStatusInput {
   ) {
     throw new Error("유효하지 않은 눈 증상 상태입니다.");
   }
-  return { ...input, note: normalizedNote(input.note) };
+  const note = normalizedNote(input.note);
+  if (
+    input.fatigue === null &&
+    input.strength === null &&
+    input.breathing === null &&
+    input.eye_symptom === null &&
+    note === null
+  ) {
+    throw new Error(
+      "상태를 하나 이상 선택하거나 비어 있지 않은 메모를 입력해 주세요."
+    );
+  }
+  return { ...input, note };
 }
 
 export type DbContextValue = {
@@ -253,7 +265,8 @@ export type DbContextValue = {
   careSpaceMembers: CareSpaceMemberWithProfile[];
   careSpaceInvites: CareSpaceInvite[];
   pendingCareSpaceInvites: PendingCareSpaceInvite[];
-  canManageSettings: boolean;
+  canManageMedicationSettings: boolean;
+  canManageFamily: boolean;
   canWriteRecords: boolean;
   initialized: boolean;
   loading: boolean;
@@ -261,9 +274,10 @@ export type DbContextValue = {
   isSupabase: boolean;
   refresh(): Promise<void>;
   selectCareSpace(id: string): Promise<void>;
-  refreshCareSpaces(): Promise<void>;
+  refreshCareSpaces(preferredId?: string): Promise<void>;
   refreshFamily(): Promise<void>;
   purgeSensitiveState(): void;
+  updateCareSpaceName(name: string): Promise<CareSpaceAccess>;
   createCareSpaceInvite(input: CreateCareSpaceInviteInput): Promise<CareSpaceInvite>;
   acceptCareSpaceInvite(inviteId: string): Promise<void>;
   declineCareSpaceInvite(inviteId: string): Promise<void>;
@@ -328,7 +342,10 @@ export function DbProvider({ children }: PropsWithChildren) {
         : [],
     [careSpaceInvitesBySpace, selectedCareSpaceId]
   );
-  const canManageSettings = selectedCareSpace?.role === "owner";
+  const canManageMedicationSettings =
+    selectedCareSpace?.role === "owner" ||
+    selectedCareSpace?.role === "caregiver";
+  const canManageFamily = selectedCareSpace?.role === "owner";
   const canWriteRecords =
     selectedCareSpace?.role === "owner" ||
     selectedCareSpace?.role === "caregiver";
@@ -379,7 +396,15 @@ export function DbProvider({ children }: PropsWithChildren) {
   const requireOwnerSpace = useCallback((): CareSpaceAccess => {
     const space = requireSelectedCareSpace();
     if (space.role !== "owner") {
-      throw new Error("이 공간의 약과 일정은 소유자만 관리할 수 있습니다.");
+      throw new Error("이 공간의 가족과 초대는 소유자만 관리할 수 있습니다.");
+    }
+    return space;
+  }, [requireSelectedCareSpace]);
+
+  const requireMedicationManagerSpace = useCallback((): CareSpaceAccess => {
+    const space = requireSelectedCareSpace();
+    if (space.role === "viewer") {
+      throw new Error("조회 전용 구성원은 약과 일정을 변경할 수 없습니다.");
     }
     return space;
   }, [requireSelectedCareSpace]);
@@ -409,15 +434,15 @@ export function DbProvider({ children }: PropsWithChildren) {
     [careSpaces, dataRequests, run]
   );
 
-  const refreshCareSpaces = useCallback(async () => {
-    const preferredId = dataRequests.selectedId();
+  const refreshCareSpaces = useCallback(async (preferredId?: string) => {
+    const nextPreferredId = preferredId ?? dataRequests.selectedId();
     const requestGeneration = dataRequests.begin();
     const result = await run(async () => {
       const [spaces, pendingInvites] = await Promise.all([
         repository.fetchCareSpaces(),
         repository.fetchPendingCareSpaceInvites(),
       ]);
-      const selected = preferredCareSpace(spaces, preferredId);
+      const selected = preferredCareSpace(spaces, nextPreferredId);
       const next = selected ? await repository.fetchAll(selected.id) : EMPTY_DB;
       return { spaces, pendingInvites, selected, next };
     });
@@ -453,12 +478,22 @@ export function DbProvider({ children }: PropsWithChildren) {
   }, [dataRequests, run]);
 
   const refresh = useCallback(async () => {
+    if (!selectedCareSpace) {
+      await revalidateAccessibleSpaces();
+      return;
+    }
     const space = requireSelectedCareSpace();
     const requestGeneration = dataRequests.begin();
     const next = await run(() => repository.fetchAll(space.id));
     if (!dataRequests.isCurrent(requestGeneration)) return;
     setDb(next);
-  }, [dataRequests, requireSelectedCareSpace, run]);
+  }, [
+    dataRequests,
+    revalidateAccessibleSpaces,
+    requireSelectedCareSpace,
+    run,
+    selectedCareSpace,
+  ]);
 
   useEffect(() => {
     const pathname = globalThis.location.pathname;
@@ -548,6 +583,31 @@ export function DbProvider({ children }: PropsWithChildren) {
     }));
   }, [dataRequests, requireSelectedCareSpace, run]);
 
+  const updateCareSpaceName = useCallback(
+    async (name: string) => {
+      const space = requireOwnerSpace();
+      const selectionGeneration = dataRequests.selectionSnapshot();
+      const row = await run(() =>
+        repository.updateCareSpace(
+          space.id,
+          assertNonEmpty(name, "복약 공간 이름", 100)
+        )
+      );
+      const updatedAccess: CareSpaceAccess = { ...row, role: space.role };
+      if (dataRequests.isSelected(space.id, selectionGeneration)) {
+        setCareSpaces((current) =>
+          current.map((candidate) =>
+            candidate.id === row.id
+              ? updatedAccess
+              : candidate
+          )
+        );
+      }
+      return updatedAccess;
+    },
+    [dataRequests, requireOwnerSpace, run]
+  );
+
   const createCareSpaceInvite = useCallback(
     async (input: CreateCareSpaceInviteInput) => {
       const space = requireOwnerSpace();
@@ -571,11 +631,11 @@ export function DbProvider({ children }: PropsWithChildren) {
 
   const acceptCareSpaceInvite = useCallback(
     async (inviteId: string) => {
-      await run(() => repository.acceptCareSpaceInvite(inviteId));
+      const member = await run(() => repository.acceptCareSpaceInvite(inviteId));
       setPendingCareSpaceInvites((current) =>
         current.filter((invite) => invite.id !== inviteId)
       );
-      await refreshCareSpaces();
+      await refreshCareSpaces(member.care_space_id);
     },
     [refreshCareSpaces, run]
   );
@@ -684,7 +744,7 @@ export function DbProvider({ children }: PropsWithChildren) {
 
   const addMedication = useCallback(
     async (input: AddMedicationInput) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       const prepared: AddMedicationInput = {
         name: assertNonEmpty(input.name, "약 이름", 100),
@@ -701,12 +761,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const updateMedication = useCallback(
     async (id: string, patch: UpdateMedicationInput) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const prepared: UpdateMedicationInput = {
@@ -732,12 +792,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const deactivateMedication = useCallback(
     async (id: string) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       const row = await run(() =>
         repository.deactivateMedication(space.id, id)
@@ -750,12 +810,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const deleteMedication = useCallback(
     async (id: string) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       const scheduleIds = db.medication_schedules
         .filter((schedule) => schedule.medication_id === id)
@@ -777,12 +837,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, db.medication_schedules, requireOwnerSpace, run]
+    [dataRequests, db.medication_schedules, requireMedicationManagerSpace, run]
   );
 
   const addSchedule = useCallback(
     async (input: AddScheduleInput) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       const prepared: AddScheduleInput = {
         medication_id: input.medication_id,
@@ -798,12 +858,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const updateSchedule = useCallback(
     async (id: string, patch: UpdateScheduleInput) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       assertPatch(patch);
       const prepared: UpdateScheduleInput = {
@@ -821,12 +881,12 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const deleteSchedule = useCallback(
     async (id: string) => {
-      const space = requireOwnerSpace();
+      const space = requireMedicationManagerSpace();
       const selectionGeneration = dataRequests.selectionSnapshot();
       const { row, next } = await run(async () => {
         const deleted = await repository.deleteSchedule(space.id, id);
@@ -838,7 +898,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
       return row;
     },
-    [dataRequests, requireOwnerSpace, run]
+    [dataRequests, requireMedicationManagerSpace, run]
   );
 
   const addLog = useCallback(
@@ -1013,7 +1073,8 @@ export function DbProvider({ children }: PropsWithChildren) {
       careSpaceMembers,
       careSpaceInvites,
       pendingCareSpaceInvites,
-      canManageSettings,
+      canManageMedicationSettings,
+      canManageFamily,
       canWriteRecords,
       initialized,
       loading,
@@ -1024,6 +1085,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       refreshCareSpaces,
       refreshFamily,
       purgeSensitiveState,
+      updateCareSpaceName,
       createCareSpaceInvite,
       acceptCareSpaceInvite,
       declineCareSpaceInvite,
@@ -1052,7 +1114,8 @@ export function DbProvider({ children }: PropsWithChildren) {
       careSpaceMembers,
       careSpaceInvites,
       pendingCareSpaceInvites,
-      canManageSettings,
+      canManageMedicationSettings,
+      canManageFamily,
       canWriteRecords,
       initialized,
       loading,
@@ -1062,6 +1125,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       refreshCareSpaces,
       refreshFamily,
       purgeSensitiveState,
+      updateCareSpaceName,
       createCareSpaceInvite,
       acceptCareSpaceInvite,
       declineCareSpaceInvite,

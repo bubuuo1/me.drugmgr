@@ -55,6 +55,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           처음 로그인하는 Google 계정은 회원으로 등록됩니다. 가족 기록은 초대를
           수락한 뒤에만 볼 수 있습니다.
         </p>
+
+        <aside
+          aria-labelledby="medical-safety-title"
+          className="mt-5 rounded-2xl bg-surface-soft px-4 py-4"
+        >
+          <h2 id="medical-safety-title" className="text-base font-bold text-ink">
+            의료·응급 안내
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-body">
+            이 앱은 의료기기나 처방 도구가 아니며 복용량을 결정하거나 처방 변경을
+            권고하지 않습니다. 응급 상황에서는 앱 기록보다 의료진과 정한 대응과
+            응급 연락을 우선해 주세요.
+          </p>
+        </aside>
       </section>
     </main>
   );

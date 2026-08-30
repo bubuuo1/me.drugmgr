@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { signOut } from "@/app/actions/auth";
 import { unsubscribeAllFromPush } from "@/app/actions/push";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@/lib/push-client";
 import { useDb } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
-import type { CareSpaceRole } from "@/lib/types";
+import type { CareSpaceAccess, CareSpaceRole } from "@/lib/types";
 
 function roleLabel(role: CareSpaceRole): string {
   if (role === "owner") return "소유자";
@@ -25,6 +25,108 @@ function messageOf(error: unknown): string {
     : "기록 대상을 변경하지 못했습니다.";
 }
 
+type CareSpaceNameFormProps = {
+  disabled: boolean;
+  space: CareSpaceAccess;
+  updateCareSpaceName(name: string): Promise<CareSpaceAccess>;
+};
+
+function CareSpaceNameForm({
+  disabled,
+  space,
+  updateCareSpaceName,
+}: CareSpaceNameFormProps) {
+  const inputId = useId();
+  const hintId = `${inputId}-hint`;
+  const errorId = `${inputId}-error`;
+  const [name, setName] = useState(space.name);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (disabled || pending) return;
+
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      setError("복약 공간 이름을 입력해 주세요.");
+      setSuccess(null);
+      return;
+    }
+    if (normalizedName.length > 100) {
+      setError("복약 공간 이름은 100자 이하로 입력해 주세요.");
+      setSuccess(null);
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const updated = await updateCareSpaceName(normalizedName);
+      setName(updated.name);
+      setSuccess("복약 공간 이름을 변경했습니다.");
+    } catch (caught) {
+      setError(messageOf(caught));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form
+      aria-label="복약 공간 이름 변경"
+      className="mt-5 rounded-xl bg-surface-soft px-4 py-4"
+      onSubmit={(event) => void submit(event)}
+    >
+      <label htmlFor={inputId} className="block text-base font-bold text-body">
+        복약 공간 이름
+      </label>
+      <div className="mt-2 flex flex-col gap-2 min-[400px]:flex-row">
+        <input
+          id={inputId}
+          value={name}
+          maxLength={100}
+          disabled={disabled || pending}
+          aria-invalid={Boolean(error) || undefined}
+          aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+          onChange={(event) => {
+            setName(event.target.value);
+            setError(null);
+            setSuccess(null);
+          }}
+          className="min-h-12 min-w-0 flex-1 rounded-xl border border-hairline bg-canvas px-4 text-base font-semibold text-ink disabled:bg-surface-strong"
+        />
+        <button
+          type="submit"
+          disabled={disabled || pending || name.trim() === space.name}
+          className="min-h-12 rounded-xl bg-primary-active px-5 text-base font-bold text-on-primary disabled:bg-primary-disabled disabled:text-body"
+        >
+          {pending ? "변경 중" : "이름 변경"}
+        </button>
+      </div>
+      <p id={hintId} className="mt-2 text-sm leading-relaxed text-muted">
+        복약 공간 이름은 소유자만 변경할 수 있습니다.
+      </p>
+      {error && (
+        <p
+          id={errorId}
+          role="alert"
+          className="mt-2 text-sm font-semibold text-error"
+        >
+          {error}
+        </p>
+      )}
+      {success && (
+        <p role="status" className="mt-2 text-sm font-semibold text-success">
+          {success}
+        </p>
+      )}
+    </form>
+  );
+}
+
 export function AccountSettingsCard() {
   const {
     careSpaces,
@@ -32,6 +134,7 @@ export function AccountSettingsCard() {
     pendingCareSpaceInvites,
     loading,
     selectCareSpace,
+    updateCareSpaceName,
     purgeSensitiveState,
   } = useDb();
   const [switching, setSwitching] = useState(false);
@@ -147,8 +250,18 @@ export function AccountSettingsCard() {
         </p>
       )}
 
+      {selectedCareSpace?.role === "owner" && (
+        <CareSpaceNameForm
+          key={selectedCareSpace.id}
+          space={selectedCareSpace}
+          disabled={loading || switching || signingOut}
+          updateCareSpaceName={updateCareSpaceName}
+        />
+      )}
+
       <Link
         href="/family"
+        replace
         className="mt-5 flex min-h-14 w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-hairline bg-canvas px-4 text-base font-bold text-ink active:bg-surface-soft"
       >
         <span>가족 관리</span>

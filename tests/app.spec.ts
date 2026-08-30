@@ -2,10 +2,12 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const runSuffix = Date.now().toString(36).slice(-7);
 const testMedicationName = "E2E기록약-" + runSuffix;
+const caregiverMedicationName = "E2E보호자약-" + runSuffix;
 const keptScheduleTime = "06:37";
 const editedScheduleTime = "22:44";
 const scheduledLogNote = "일정 연결 기록 " + runSuffix;
 const editedLogNote = "수정된 투약 기록 " + runSuffix;
+const preservedScheduleEditNote = "삭제 일정 분류 보존 " + runSuffix;
 const statusNote = "상태 기록 " + runSuffix;
 const firstDuplicateNote = "첫 중복 검사 기록 " + runSuffix;
 const secondDuplicateNote = "중복 확인 기록 " + runSuffix;
@@ -61,6 +63,46 @@ async function selectPressed(button: Locator) {
   await expect(button).toHaveAttribute("aria-pressed", "true");
 }
 
+async function selectTime(page: Page, trigger: Locator, value: string) {
+  const [hour, minute] = value.split(":");
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const hourInput = dialog.getByRole("textbox", { name: "시", exact: true });
+  await expect(hourInput).toBeFocused();
+  await hourInput.fill(hour);
+  await dialog.getByRole("textbox", { name: "분", exact: true }).fill(minute);
+  await dialog
+    .getByRole("button", { name: "선택 완료", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toHaveAttribute("data-value", value);
+}
+
+async function selectDateTime(
+  page: Page,
+  scope: Page | Locator,
+  value: string
+) {
+  const date = value.slice(0, 10);
+  const time = value.slice(11, 16);
+  const dateTrigger = scope.getByRole("button", {
+    name: /^실제 복용 날짜, 현재/,
+  });
+  if ((await dateTrigger.getAttribute("data-value")) !== date) {
+    await dateTrigger.click();
+    const dateDialog = page.getByRole("dialog", {
+      name: "실제 복용 날짜 달력",
+      exact: true,
+    });
+    await dateDialog.locator(`[data-date="${date}"]`).click();
+  }
+  const timeTrigger = scope.getByRole("button", {
+    name: /^실제 복용 시간, 현재/,
+  });
+  await selectTime(page, timeTrigger, time);
+}
+
 async function finishPossibleDuplicateDialog(page: Page) {
   const savedRegion = page.getByRole("region", { name: "저장 완료" });
   const dialog = page.getByRole("dialog");
@@ -106,11 +148,55 @@ test("홈에서 빠른 기록, 상태, 복용기록과 모바일 하단 메뉴�
     page.getByRole("link", { name: "복용기록 확인", exact: true })
   ).toBeVisible();
   await expect(
+    page.getByRole("link", { name: "약·일정 관리", exact: true })
+  ).toBeVisible();
+  await expect(
     page.getByRole("link", { name: "환경설정", exact: true })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "가족 공간과 계정" })
   ).toHaveCount(0);
+});
+
+test("주요 메뉴와 환경설정 하위 화면은 방문 기록을 불필요하게 쌓지 않는다", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const initialHistoryLength = await page.evaluate(() => window.history.length);
+  const navigation = page.getByRole("navigation", { name: "주요 메뉴" });
+
+  await navigation
+    .getByRole("link", { name: "복용기록", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/records$/);
+  await navigation
+    .getByRole("link", { name: "환경설정", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await navigation
+    .getByRole("link", { name: "첫 화면", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect
+    .poll(() => page.evaluate(() => window.history.length))
+    .toBe(initialHistoryLength);
+
+  await navigation
+    .getByRole("link", { name: "환경설정", exact: true })
+    .click();
+  await page.getByRole("link", { name: /가족 관리/ }).click();
+  await expect(page).toHaveURL(/\/family$/);
+  await expect
+    .poll(() => page.evaluate(() => window.history.length))
+    .toBe(initialHistoryLength);
+  await page
+    .locator("main header")
+    .getByRole("link", { name: "환경설정으로 이동", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect
+    .poll(() => page.evaluate(() => window.history.length))
+    .toBe(initialHistoryLength);
 });
 
 test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 있다", async ({
@@ -121,9 +207,32 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
   const accountSection = page.getByRole("region", {
     name: "계정과 가족",
   });
-  await expect(accountSection.getByLabel("기록 대상")).toHaveValue(
+  await expect(
+    accountSection.getByRole("combobox", {
+      name: "기록 대상",
+      exact: true,
+    })
+  ).toHaveValue(
     "mock-care-space"
   );
+  const renamedSpace = `우리 집 복약 ${runSuffix}`;
+  await accountSection
+    .getByLabel("복약 공간 이름", { exact: true })
+    .fill(renamedSpace);
+  await accountSection
+    .getByRole("button", { name: "이름 변경", exact: true })
+    .click();
+  await expect(
+    accountSection.getByText("복약 공간 이름을 변경했습니다.", {
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(
+    accountSection.getByRole("combobox", {
+      name: "기록 대상",
+      exact: true,
+    })
+  ).toContainText(renamedSpace);
   await accountSection
     .getByRole("link", { name: /가족 관리/ })
     .click();
@@ -169,6 +278,89 @@ test("현재 가족 공간을 확인하고 Google 계정 초대를 만들 수 �
   await expect(inviteRow).toContainText("조회 전용");
 });
 
+test("보호자는 가족 구성원을 확인하고 약과 임의 시각을 설정할 수 있다", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const spaceSelect = page.getByRole("combobox", {
+    name: "기록 대상",
+    exact: true,
+  });
+  await spaceSelect.selectOption("mock-second-care-space");
+  await expect(spaceSelect).toHaveValue("mock-second-care-space");
+  await expect(
+    page.getByRole("form", { name: "복약 공간 이름 변경" })
+  ).toHaveCount(0);
+
+  await page.getByRole("link", { name: /가족 관리/ }).click();
+  const membersSection = page.locator("section").filter({
+    has: page.getByRole("heading", {
+      level: 2,
+      name: "두 번째 복약 공간 구성원",
+      exact: true,
+    }),
+  });
+  await expect(membersSection).toBeVisible();
+  await expect(
+    membersSection.getByText("초대한 가족", { exact: true })
+  ).toBeVisible();
+  await expect(membersSection.getByText("소유자", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 2, name: "가족 초대", exact: true })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "접근 제거", exact: true })
+  ).toHaveCount(0);
+
+  await page
+    .locator("main header")
+    .getByRole("link", { name: "환경설정으로 이동", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(spaceSelect).toHaveValue("mock-second-care-space");
+
+  await page.getByRole("button", { name: "새 약 추가", exact: true }).click();
+  const medicationForm = page.getByRole("group", { name: "새 약" });
+  await medicationForm
+    .getByLabel("약 이름", { exact: true })
+    .fill(caregiverMedicationName);
+  await medicationForm
+    .getByRole("checkbox", { name: "수량 없이 복용 여부만 기록" })
+    .check();
+  await medicationForm
+    .getByRole("button", { name: "약 설정 저장", exact: true })
+    .click();
+
+  const medicationCard = page.getByRole("article").filter({
+    has: page.getByRole("heading", {
+      level: 3,
+      name: caregiverMedicationName,
+      exact: true,
+    }),
+  });
+  await expect(medicationCard).toBeVisible();
+  await medicationCard
+    .getByRole("button", {
+      name: `${caregiverMedicationName} 알림 시간 추가`,
+      exact: true,
+    })
+    .click();
+  const scheduleForm = medicationCard.getByRole("group", {
+    name: caregiverMedicationName + " 새 복용·알림 시간 입력",
+  });
+  await selectTime(
+    page,
+    scheduleForm.getByRole("button", { name: /^예정 시각, 현재/ }),
+    "08:07"
+  );
+  await scheduleForm
+    .getByRole("button", { name: "이 시간 추가", exact: true })
+    .click();
+  await expect(
+    medicationCard.getByRole("listitem").filter({ hasText: "08:07" })
+  ).toBeVisible();
+});
+
 test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터가 남지 않는다", async ({
   page,
 }) => {
@@ -190,13 +382,19 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
   });
 
   await page.getByRole("link", { name: "환경설정", exact: true }).click();
-  const spaceSelect = page.getByLabel("기록 대상");
+  const spaceSelect = page.getByRole("combobox", {
+    name: "기록 대상",
+    exact: true,
+  });
   await spaceSelect.selectOption("mock-second-care-space");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
   await page.getByRole("link", { name: "첫 화면", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
+  const emptyMedicationMessage = page.getByText("활성화된 약이 없습니다.");
+  await expect(emptyMedicationMessage).toBeVisible();
+  await expect(emptyMedicationMessage.locator("..")).toHaveClass(/items-center/);
+  await expect(emptyMedicationMessage.locator("..")).toHaveClass(/text-center/);
   await expect(
     page.getByRole("heading", { level: 2, name: "메스티논", exact: true })
   ).toHaveCount(0);
@@ -219,12 +417,17 @@ test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 
   page,
 }) => {
   await page.goto("/settings");
-  const spaceSelect = page.getByLabel("기록 대상");
+  const spaceSelect = page.getByRole("combobox", {
+    name: "기록 대상",
+    exact: true,
+  });
   await spaceSelect.selectOption("mock-second-care-space");
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
 
   await page.reload();
-  await expect(page.getByLabel("기록 대상")).toHaveValue("mock-care-space");
+  await expect(
+    page.getByRole("combobox", { name: "기록 대상", exact: true })
+  ).toHaveValue("mock-care-space");
 
   await page.goto("/?space=mock-second-care-space");
   await expect(page.getByRole("complementary", { name: "현재 기록 대상" }))
@@ -232,7 +435,7 @@ test("새로 열면 소유자 기록이 기본이고 알림 딥링크는 가족 
   await expect(page.getByText("활성화된 약이 없습니다.")).toBeVisible();
 });
 
-test("320px 모바일 화면에서 주요 화면에 가로 스크롤이 생기지 않는다", async ({
+test("320px와 375px 모바일 화면에서 주요 화면과 시간 선택기가 한 화면에 맞는다", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 700 });
@@ -250,6 +453,67 @@ test("320px 모바일 화면에서 주요 화면에 가로 스크롤이 생기�
       )
       .toBe(true);
   }
+
+  await page.goto("/records");
+  await page.locator("#record-date").click();
+  await expect(
+    page.getByRole("dialog", { name: "날짜 직접 선택 달력", exact: true })
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth
+      )
+    )
+    .toBe(true);
+  await page.keyboard.press("Escape");
+
+  for (const width of [320, 375]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/log?med=med-mestinon&extra=1");
+    await page
+      .getByRole("button", { name: /^실제 복용 시간, 현재/ })
+      .click();
+    const timeDialog = page.getByRole("dialog", {
+      name: "실제 복용 시간 선택",
+      exact: true,
+    });
+    await expect(timeDialog).toBeVisible();
+
+    const [hourBox, minuteBox] = await Promise.all([
+      timeDialog.getByRole("textbox", { name: "시", exact: true }).boundingBox(),
+      timeDialog.getByRole("textbox", { name: "분", exact: true }).boundingBox(),
+    ]);
+    expect(hourBox, `${width}px에서 시 입력칸이 보여야 합니다.`).not.toBeNull();
+    expect(minuteBox, `${width}px에서 분 입력칸이 보여야 합니다.`).not.toBeNull();
+    expect(
+      Math.abs((hourBox?.y ?? 0) - (minuteBox?.y ?? 0)),
+      `${width}px에서 시와 분 입력칸이 같은 행에 있어야 합니다.`
+    ).toBeLessThan(1);
+
+    const stepButtons = timeDialog.getByRole("button", {
+      name: /^[시분] 1 (?:내리기|올리기)$/,
+    });
+    await expect(stepButtons).toHaveCount(4);
+    for (const button of await stepButtons.all()) {
+      const box = await button.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(48);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
+    }
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth
+        )
+      )
+      .toBe(true);
+    await page.keyboard.press("Escape");
+  }
 });
 
 test("복용기록 날짜를 이전·오늘·직접 선택으로 안전하게 이동한다", async ({
@@ -257,31 +521,46 @@ test("복용기록 날짜를 이전·오늘·직접 선택으로 안전하게 �
 }) => {
   await page.goto("/records");
 
-  const dateInput = page.getByLabel("날짜 직접 선택", { exact: true });
+  const dateTrigger = page.locator("#record-date");
   const today = kstDateKey();
-  await expect(dateInput).toHaveValue(today);
+  await expect(dateTrigger).toHaveAttribute("data-value", today);
   await expect(
     page.getByRole("button", { name: "현재 날짜는 오늘", exact: true })
   ).toBeDisabled();
 
   await page.getByRole("button", { name: /^이전 날짜,/ }).click();
-  await expect(dateInput).toHaveValue(shiftDateKey(today, -1));
+  await expect(dateTrigger).toHaveAttribute("data-value", shiftDateKey(today, -1));
   await page
     .getByRole("button", { name: "오늘 날짜로 이동", exact: true })
     .click();
-  await expect(dateInput).toHaveValue(today);
+  await expect(dateTrigger).toHaveAttribute("data-value", today);
 
-  await dateInput.fill("");
-  await expect(page.locator("#record-date-error")).toContainText(
-    "날짜를 선택해 주세요."
-  );
+  await dateTrigger.click();
+  const dateDialog = page.getByRole("dialog", {
+    name: "날짜 직접 선택 달력",
+    exact: true,
+  });
+  await expect(dateDialog).toBeVisible();
   await expect(
-    page.getByRole("heading", { level: 1, name: "복용기록 확인" })
+    dateDialog
+      .getByRole("gridcell", { selected: true })
+      .locator(`[data-date="${today}"]`)
   ).toBeVisible();
+  await expect(dateDialog.locator(`[data-date="${today}"]`)).toContainText(
+    "오늘·선택"
+  );
+  await page.keyboard.press("Escape");
+  await expect(dateDialog).toHaveCount(0);
+  await expect(dateTrigger).toBeFocused();
 
-  await dateInput.fill("2026-08-28");
-  await expect(dateInput).toHaveValue("2026-08-28");
-  await expect(page.locator('time[datetime="2026-08-28"]')).toBeVisible();
+  const selectedDate = shiftDateKey(today, -2);
+  await dateTrigger.click();
+  await dateDialog.locator(`[data-date="${selectedDate}"]`).click();
+  await expect(dateTrigger).toHaveAttribute("data-value", selectedDate);
+  await expect(
+    dateTrigger.locator(`time[datetime="${selectedDate}"]`)
+  ).toBeVisible();
+  await expect(page.locator('input[type="date"]')).toHaveCount(0);
 });
 
 test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시한다", async ({
@@ -298,6 +577,58 @@ test("로그아웃하면 현재 기록을 지우고 로그인 화면만 표시�
     page.getByRole("navigation", { name: "주요 메뉴" })
   ).toHaveCount(0);
   await expect(page.getByText("메스티논", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { level: 2, name: "의료·응급 안내" })
+  ).toBeVisible();
+  await expect(page.getByText(/응급 상황에서는 앱 기록보다/)).toBeVisible();
+});
+
+test("분류가 없거나 무효인 일정 링크를 추가 복용으로 자동 전환하지 않는다", async ({
+  page,
+}) => {
+  for (const path of [
+    "/log?med=med-mestinon",
+    "/log?med=med-mestinon&schedule=missing-schedule",
+  ]) {
+    await page.goto(path);
+    await expect(page.getByText(/추가 복용으로 자동 전환하지 않으니/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "기록 저장", exact: true })
+    ).toHaveCount(0);
+  }
+
+  await page
+    .getByRole("link", { name: "추가 복용으로 기록하기", exact: true })
+    .click();
+  await expect(page).toHaveURL(/extra=1/);
+  await expect(
+    page.getByRole("heading", { level: 2, name: "추가 복용 기록" })
+  ).toBeVisible();
+});
+
+test("이전 날짜의 약별 마지막 복용은 날짜와 시각·수량을 함께 표시한다", async ({
+  page,
+}) => {
+  const previousDate = shiftDateKey(kstDateKey(), -1);
+  const [, month, day] = previousDate.split("-").map(Number);
+
+  await page.goto("/log?med=med-mestinon&extra=1");
+  await page.getByRole("button", { name: "1정", exact: true }).click();
+  await selectDateTime(page, page, `${previousDate}T09:17`);
+  await page.getByRole("button", { name: "기록 저장", exact: true }).click();
+  await finishPossibleDuplicateDialog(page);
+  await page.getByRole("link", { name: "첫 화면으로", exact: true }).click();
+
+  const medicationCard = page.getByRole("article").filter({
+    has: page.getByRole("heading", {
+      level: 2,
+      name: "메스티논",
+      exact: true,
+    }),
+  });
+  await expect(medicationCard).toContainText(
+    `마지막 복용 ${month}월 ${day}일 09:17 · 1정`
+  );
 });
 
 test("파비콘, 설치용 앱 아이콘과 알림 배지를 제공한다", async ({ page }) => {
@@ -337,6 +668,8 @@ test("파비콘, 설치용 앱 아이콘과 알림 배지를 제공한다", asyn
     start_url: "/",
     scope: "/",
     display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#ff385c",
     icons: [
       {
         src: "/icon-192x192.png",
@@ -358,6 +691,10 @@ test("파비콘, 설치용 앱 아이콘과 알림 배지를 제공한다", asyn
       },
     ],
   });
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+    "content",
+    "#ff385c"
+  );
 });
 
 test("서비스 워커는 오프라인 캐시 없이 푸시 알림만 처리한다", async ({
@@ -462,9 +799,14 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(scheduleForm.getByRole("alert")).toContainText(
     "예정 시각을 입력해 주세요."
   );
-  await scheduleForm
-    .getByLabel("예정 시각", { exact: true })
-    .fill(keptScheduleTime);
+  await expect(
+    scheduleForm.getByRole("button", { name: /^예정 시각, 현재/ })
+  ).toBeFocused();
+  await selectTime(
+    page,
+    scheduleForm.getByRole("button", { name: /^예정 시각, 현재/ }),
+    keptScheduleTime
+  );
   await expect(scheduleForm.getByText(/예정 수량/)).toHaveCount(0);
   await expect(scheduleForm.locator('input[type="number"]')).toHaveCount(0);
   await scheduleForm
@@ -485,10 +827,14 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   scheduleForm = settingsCard.getByRole("group", {
     name: testMedicationName + " 새 복용·알림 시간 입력",
   });
-  await expect(scheduleForm.getByLabel("예정 시각", { exact: true })).toHaveValue(
-    ""
+  await expect(
+    scheduleForm.getByRole("button", { name: /^예정 시각, 현재/ })
+  ).toHaveAttribute("data-value", "");
+  await selectTime(
+    page,
+    scheduleForm.getByRole("button", { name: /^예정 시각, 현재/ }),
+    "22:43"
   );
-  await scheduleForm.getByLabel("예정 시각", { exact: true }).fill("22:43");
   await scheduleForm
     .getByRole("button", { name: "이 시간 추가", exact: true })
     .click();
@@ -526,9 +872,11 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   const editScheduleForm = temporarySchedule.getByRole("group", {
     name: `${testMedicationName} 22:43 복용·알림 시간 수정`,
   });
-  await editScheduleForm
-    .getByLabel("예정 시각", { exact: true })
-    .fill(editedScheduleTime);
+  await selectTime(
+    page,
+    editScheduleForm.getByRole("button", { name: /^예정 시각, 현재/ }),
+    editedScheduleTime
+  );
   await expect(editScheduleForm.getByText(/예정 수량/)).toHaveCount(0);
   await expect(editScheduleForm.locator('input[type="number"]')).toHaveCount(0);
   await editScheduleForm
@@ -610,6 +958,11 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     name: keptScheduleTime + " 예정 기록",
     exact: true,
   });
+  const pendingScheduleRow = page
+    .getByRole("region", { name: "오늘 예정" })
+    .getByRole("listitem")
+    .filter({ hasText: keptScheduleTime + " · " + testMedicationName });
+  await expect(pendingScheduleRow).toContainText("아직 기록 없음");
   await expect(page.getByText(/예정 수량/)).toHaveCount(0);
   const scheduledHref = await scheduledLink.getAttribute("href");
   expect(scheduledHref).not.toBeNull();
@@ -636,16 +989,27 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(
     page.getByRole("button", { name: "0.5정", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
+  const quantityInput = page.getByLabel("직접 입력", { exact: true });
+  await quantityInput.fill("");
+  await page.getByRole("button", { name: "기록 저장", exact: true }).click();
+  await expect(quantityInput).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#taken-at-date")).not.toHaveAttribute(
+    "aria-invalid",
+    "true"
+  );
+  await expect(page.locator("#taken-at-time")).not.toHaveAttribute(
+    "aria-invalid",
+    "true"
+  );
   await page.getByRole("button", { name: "1.5정", exact: true }).click();
+  await expect(page.locator("#log-field-error")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "1.5정", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
-  await page
-    .getByLabel("실제 복용 시각", { exact: true })
-    .fill(kstDateTime("06:39"));
-  await page
-    .getByLabel("메모 (선택)", { exact: true })
-    .fill(scheduledLogNote);
+  await selectDateTime(page, page, kstDateTime("06:39"));
+  const logNoteInput = page.getByLabel("메모 (선택)", { exact: true });
+  await expect(logNoteInput).toHaveAttribute("maxlength", "2000");
+  await logNoteInput.fill(scheduledLogNote);
   await page.getByRole("button", { name: "기록 저장", exact: true }).click();
   await expect(page.getByRole("region", { name: "저장 완료" })).toContainText(
     "기록 완료"
@@ -660,7 +1024,10 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .getByRole("listitem")
     .filter({ hasText: keptScheduleTime + " · " + testMedicationName });
   await expect(scheduleRow).toContainText("실제 기록 06:39");
-  await expect(scheduleRow).toContainText("기록됨");
+  await expect(scheduleRow).toContainText("기록 있음");
+  await expect(homeMedicationCard).toContainText(
+    "마지막 복용 오늘 06:39 · 1.5정"
+  );
   await expect(
     page
       .getByRole("article")
@@ -691,12 +1058,13 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await editForm
     .getByLabel("복용 수량 (정)", { exact: true })
     .fill("1.25");
-  await editForm
-    .getByLabel("실제 복용 시각", { exact: true })
-    .fill(kstDateTime("13:21"));
-  await editForm
-    .getByRole("textbox", { name: "메모 (선택)", exact: true })
-    .fill(editedLogNote);
+  await selectDateTime(page, editForm, kstDateTime("13:21"));
+  const editNoteInput = editForm.getByRole("textbox", {
+    name: "메모 (선택)",
+    exact: true,
+  });
+  await expect(editNoteInput).toHaveAttribute("maxlength", "2000");
+  await editNoteInput.fill(editedLogNote);
   await editForm
     .getByRole("button", { name: "수정 내용 저장", exact: true })
     .click();
@@ -732,9 +1100,11 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await selectPressed(page.getByRole("button", { name: /^평소와 비슷함/ }));
   await selectPressed(page.getByRole("button", { name: /^평소와 같음/ }));
   await selectPressed(page.getByRole("button", { name: /^증상 없음/ }));
-  await page
-    .getByLabel("기타 메모 (선택)", { exact: true })
-    .fill(statusNote);
+  const statusNoteInput = page.getByLabel("기타 메모 (선택)", {
+    exact: true,
+  });
+  await expect(statusNoteInput).toHaveAttribute("maxlength", "2000");
+  await statusNoteInput.fill(statusNote);
   await page
     .getByRole("button", { name: /^상태 기록 (저장|수정)$/ })
     .click();
@@ -767,6 +1137,64 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
       exact: true,
     }),
   });
+  const keptSchedule = medicationToDelete
+    .getByRole("listitem")
+    .filter({ hasText: keptScheduleTime });
+  await keptSchedule
+    .getByRole("button", {
+      name: `${testMedicationName} ${keptScheduleTime} 복용·알림 시간 삭제`,
+      exact: true,
+    })
+    .click();
+  const keptScheduleDeleteDialog = page.getByRole("dialog", {
+    name: "복용·알림 시간을 삭제할까요?",
+  });
+  await keptScheduleDeleteDialog
+    .getByRole("button", { name: "복용·알림 시간 삭제", exact: true })
+    .click();
+  await expect(keptSchedule).toHaveCount(0);
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "복용기록", exact: true })
+    .click();
+  logItem = timeline.getByRole("listitem").filter({ hasText: editedLogNote });
+  await expect(logItem).toContainText("예정 " + keptScheduleTime);
+  await logItem.getByRole("button", { name: "수정", exact: true }).click();
+  const preservedEditForm = page
+    .getByRole("heading", {
+      level: 4,
+      name: testMedicationName + " 기록 수정",
+      exact: true,
+    })
+    .locator("..");
+  const preservedClassification = preservedEditForm.getByRole("combobox", {
+    name: "일정 연결",
+    exact: true,
+  });
+  await expect(preservedClassification.locator("option:checked")).toHaveText(
+    `기존 일정 기록 유지 · 예정 ${keptScheduleTime}`
+  );
+  await preservedEditForm
+    .getByLabel("복용 수량 (정)", { exact: true })
+    .fill("1.75");
+  await preservedEditForm
+    .getByRole("textbox", { name: "메모 (선택)", exact: true })
+    .fill(preservedScheduleEditNote);
+  await preservedEditForm
+    .getByRole("button", { name: "수정 내용 저장", exact: true })
+    .click();
+  await expect(page.getByText(/기록을 수정했습니다/)).toBeVisible();
+  logItem = timeline
+    .getByRole("listitem")
+    .filter({ hasText: preservedScheduleEditNote });
+  await expect(logItem).toContainText("1.75정");
+  await expect(logItem).toContainText("예정 " + keptScheduleTime);
+
+  await page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .getByRole("link", { name: "환경설정", exact: true })
+    .click();
   await medicationToDelete
     .getByRole("button", {
       name: `${testMedicationName} 등록된 약 삭제`,
@@ -794,10 +1222,11 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   const preservedLog = page
     .getByRole("region", { name: "투약 타임라인" })
     .getByRole("listitem")
-    .filter({ hasText: editedLogNote });
+    .filter({ hasText: preservedScheduleEditNote });
   await expect(preservedLog).toContainText(testMedicationName);
   await expect(preservedLog).toContainText("13:21");
-  await expect(preservedLog).toContainText("1.25정");
+  await expect(preservedLog).toContainText("1.75정");
+  await expect(preservedLog).toContainText("예정 " + keptScheduleTime);
 });
 
 test("같은 약을 최근 시각에 다시 저장하면 중복 확인을 거친다", async ({
@@ -814,9 +1243,7 @@ test("같은 약을 최근 시각에 다시 저장하면 중복 확인을 거친
   await mestinonCard.getByRole("link", { name: "복용 기록" }).click();
 
   await page.getByRole("button", { name: "2정", exact: true }).click();
-  await page
-    .getByLabel("실제 복용 시각", { exact: true })
-    .fill(kstDateTime("11:11"));
+  await selectDateTime(page, page, kstDateTime("11:11"));
   await page
     .getByLabel("메모 (선택)", { exact: true })
     .fill(firstDuplicateNote);
@@ -830,9 +1257,7 @@ test("같은 약을 최근 시각에 다시 저장하면 중복 확인을 거친
     .getByRole("button", { name: "같은 약 추가 기록", exact: true })
     .click();
   await page.getByRole("button", { name: "1정", exact: true }).click();
-  await page
-    .getByLabel("실제 복용 시각", { exact: true })
-    .fill(kstDateTime("11:12"));
+  await selectDateTime(page, page, kstDateTime("11:12"));
   await page
     .getByLabel("메모 (선택)", { exact: true })
     .fill(secondDuplicateNote);

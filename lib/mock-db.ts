@@ -27,6 +27,7 @@ export const MOCK_USER_EMAIL = "mock@example.com";
 export const MOCK_CARE_SPACE_ID = "mock-care-space";
 export const MOCK_SECOND_CARE_SPACE_ID = "mock-second-care-space";
 const MOCK_FAMILY_USER_ID = "mock-family-user";
+const MOCK_SECOND_OWNER_ID = "mock-second-owner";
 
 const profiles: Profile[] = [
   {
@@ -39,6 +40,13 @@ const profiles: Profile[] = [
   {
     user_id: MOCK_FAMILY_USER_ID,
     display_name: "테스트 보호자",
+    avatar_url: null,
+    created_at: SEED_TIME,
+    updated_at: SEED_TIME,
+  },
+  {
+    user_id: MOCK_SECOND_OWNER_ID,
+    display_name: "초대한 가족",
     avatar_url: null,
     created_at: SEED_TIME,
     updated_at: SEED_TIME,
@@ -56,7 +64,7 @@ const careSpaces: CareSpace[] = [
   {
     id: MOCK_SECOND_CARE_SPACE_ID,
     name: "두 번째 복약 공간",
-    created_by: MOCK_USER_ID,
+    created_by: MOCK_SECOND_OWNER_ID,
     created_at: SEED_TIME,
     updated_at: SEED_TIME,
   },
@@ -75,6 +83,14 @@ const careSpaceMembers: CareSpaceMember[] = [
     care_space_id: MOCK_SECOND_CARE_SPACE_ID,
     user_id: MOCK_USER_ID,
     role: "caregiver",
+    invited_by: null,
+    created_at: SEED_TIME,
+    updated_at: SEED_TIME,
+  },
+  {
+    care_space_id: MOCK_SECOND_CARE_SPACE_ID,
+    user_id: MOCK_SECOND_OWNER_ID,
+    role: "owner",
     invited_by: null,
     created_at: SEED_TIME,
     updated_at: SEED_TIME,
@@ -219,6 +235,35 @@ function replaceById<T extends { id: string }>(rows: T[], row: T): void {
   rows[index] = row;
 }
 
+function normalizedNullableText(value: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
+}
+
+function isSameLogRequest(
+  row: MedicationLog,
+  input: RequiredAddMedicationLogInput
+): boolean {
+  return (
+    row.medication_id === input.medication_id &&
+    row.schedule_id === input.schedule_id &&
+    new Date(row.taken_at).getTime() === new Date(input.taken_at).getTime() &&
+    Number(row.quantity) === Number(input.quantity) &&
+    normalizedNullableText(row.note) === normalizedNullableText(input.note) &&
+    row.is_extra === input.is_extra
+  );
+}
+
+function hasStatusContent(input: DailyStatusInput): boolean {
+  return (
+    input.fatigue !== null ||
+    input.strength !== null ||
+    input.breathing !== null ||
+    input.eye_symptom !== null ||
+    normalizedNullableText(input.note) !== null
+  );
+}
+
 export class MockDbRepository implements DbRepository {
   async fetchCareSpaces(): Promise<CareSpaceAccess[]> {
     const spaces = careSpaceMembers
@@ -228,6 +273,20 @@ export class MockDbRepository implements DbRepository {
         role: member.role,
       }));
     return clone(spaces);
+  }
+
+  async updateCareSpace(careSpaceId: string, name: string): Promise<CareSpace> {
+    const current = careSpaceById(careSpaceId);
+    const membership = careSpaceMembers.find(
+      (member) =>
+        member.care_space_id === careSpaceId && member.user_id === MOCK_USER_ID
+    );
+    if (membership?.role !== "owner") {
+      throw new Error("복약 공간 이름은 소유자만 변경할 수 있습니다.");
+    }
+    const updated = { ...current, name, updated_at: now() };
+    replaceById(careSpaces, updated);
+    return clone(updated);
   }
 
   async fetchPendingCareSpaceInvites(): Promise<PendingCareSpaceInvite[]> {
@@ -427,7 +486,9 @@ export class MockDbRepository implements DbRepository {
         )
         .sort((a, b) => a.time.localeCompare(b.time)),
       medication_logs: memoryDb.medication_logs
-        .filter((row) => row.care_space_id === careSpaceId)
+        .filter(
+          (row) => row.care_space_id === careSpaceId && row.deleted_at === null
+        )
         .sort((a, b) => a.taken_at.localeCompare(b.taken_at)),
       daily_status: memoryDb.daily_status
         .filter((row) => row.care_space_id === careSpaceId)
@@ -628,7 +689,12 @@ export class MockDbRepository implements DbRepository {
         log.care_space_id === careSpaceId &&
         log.client_request_id === input.client_request_id
     );
-    if (duplicate) return clone(duplicate);
+    if (duplicate) {
+      if (isSameLogRequest(duplicate, input)) return clone(duplicate);
+      throw new Error(
+        "같은 요청 ID로 이미 다른 내용의 투약 기록이 저장되어 있습니다. 기록을 새로고침한 뒤 다시 시도해 주세요."
+      );
+    }
 
     const medication = medicationById(careSpaceId, input.medication_id);
     const schedule = input.schedule_id
@@ -668,32 +734,31 @@ export class MockDbRepository implements DbRepository {
   ): Promise<MedicationLog> {
     const current = logById(careSpaceId, logId);
     const clean = definedPatch(patch);
-    const medicationId = patch.medication_id ?? current.medication_id;
-    const medication = medicationById(
-      careSpaceId,
-      medicationId,
-      medicationId === current.medication_id
-    );
     const scheduleId = hasOwn(patch, "schedule_id")
       ? patch.schedule_id ?? null
       : current.schedule_id;
     const schedule = scheduleId ? scheduleById(careSpaceId, scheduleId) : null;
-    if (schedule && schedule.medication_id !== medication.id) {
+    const isExtra = patch.is_extra ?? current.is_extra;
+    if (schedule && isExtra) {
+      throw new Error("일정에 연결된 기록은 추가 복용으로 표시할 수 없습니다.");
+    }
+    if (schedule && schedule.medication_id !== current.medication_id) {
       throw new Error("선택한 일정과 약이 일치하지 않습니다.");
     }
 
-    const medicationChanged = medication.id !== current.medication_id;
     const scheduleChanged = scheduleId !== current.schedule_id;
     const updated: MedicationLog = {
       ...current,
       ...clean,
-      medication_id: medication.id,
       schedule_id: scheduleId,
-      medication_name: medicationChanged ? medication.name : current.medication_name,
-      medication_unit: medicationChanged ? medication.unit : current.medication_unit,
-      schedule_time: scheduleChanged
-        ? schedule?.time ?? (patch.is_extra ? null : current.schedule_time)
-        : current.schedule_time,
+      is_extra: isExtra,
+      schedule_time: schedule
+        ? scheduleChanged
+          ? schedule.time
+          : current.schedule_time
+        : isExtra
+          ? null
+          : current.schedule_time,
       updated_by: MOCK_USER_ID,
       updated_at: now(),
     };
@@ -737,6 +802,11 @@ export class MockDbRepository implements DbRepository {
     input: DailyStatusInput
   ): Promise<DailyStatus> {
     careSpaceById(careSpaceId);
+    if (!hasStatusContent(input)) {
+      throw new Error(
+        "상태를 하나 이상 선택하거나 비어 있지 않은 메모를 입력해 주세요."
+      );
+    }
     const current = memoryDb.daily_status.find(
       (status) =>
         status.care_space_id === careSpaceId && status.date === input.date

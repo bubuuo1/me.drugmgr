@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { supabaseConfigurationError } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
 
 type LoginButtonProps = {
@@ -10,8 +11,12 @@ type LoginButtonProps = {
 export function LoginButton({ nextPath }: LoginButtonProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const configurationMessage = supabaseConfigurationError
+    ? "Supabase 연결 설정이 필요합니다. 앱 관리자에게 문의해 주세요."
+    : null;
 
   async function signInWithGoogle() {
+    if (configurationMessage) return;
     setPending(true);
     setError(null);
 
@@ -43,7 +48,7 @@ export function LoginButton({ nextPath }: LoginButtonProps) {
       <button
         type="button"
         onClick={() => void signInWithGoogle()}
-        disabled={pending}
+        disabled={pending || Boolean(configurationMessage)}
         className="flex min-h-16 w-full items-center justify-center gap-3 rounded-full border-2 border-ink bg-canvas px-6 text-xl font-bold text-ink active:bg-surface-soft disabled:border-hairline disabled:bg-surface-soft disabled:text-muted"
       >
         <span
@@ -55,12 +60,12 @@ export function LoginButton({ nextPath }: LoginButtonProps) {
         {pending ? "Google로 이동하는 중…" : "Google로 계속하기"}
       </button>
 
-      {error && (
+      {(configurationMessage || error) && (
         <p
           role="alert"
           className="mt-4 rounded-2xl border border-error bg-canvas px-4 py-3 text-base font-semibold leading-relaxed text-error"
         >
-          {error}
+          {configurationMessage ?? error}
         </p>
       )}
     </div>

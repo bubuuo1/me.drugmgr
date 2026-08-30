@@ -3,6 +3,7 @@ import { requireSupabase } from "@/lib/supabase";
 import type {
   AddMedicationInput,
   AddScheduleInput,
+  CareSpace,
   CareSpaceAccess,
   CareSpaceInvite,
   CareSpaceMember,
@@ -23,10 +24,67 @@ import type {
 type QueryError = {
   message: string;
   code?: string;
+  status?: number;
 };
 
 function failure(operation: string, error: QueryError): Error {
-  return new Error(`${operation} 실패: ${error.message}`);
+  const code = error.code?.toLowerCase() ?? "";
+  const message = error.message.toLowerCase();
+
+  if (
+    error.status === 401 ||
+    (error.status === 403 && operation === "현재 사용자 확인") ||
+    code === "bad_jwt" ||
+    code === "invalid_token" ||
+    code === "session_not_found" ||
+    code === "user_not_found" ||
+    code === "refresh_token_not_found" ||
+    code === "pgrst301" ||
+    message.includes("jwt expired") ||
+    message.includes("invalid jwt")
+  ) {
+    return new Error(
+      `${operation} 작업에 필요한 로그인 정보를 확인할 수 없습니다. 다시 로그인한 뒤 재시도해 주세요.`
+    );
+  }
+
+  if (
+    error.status === 403 ||
+    code === "42501" ||
+    message.includes("permission denied") ||
+    message.includes("insufficient privilege") ||
+    message.includes("row-level security")
+  ) {
+    return new Error(
+      `${operation} 작업을 수행할 권한이 없습니다. 현재 복약 공간과 역할을 확인한 뒤 재시도해 주세요.`
+    );
+  }
+
+  if (
+    code === "fetch_error" ||
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("network request failed")
+  ) {
+    return new Error(
+      `${operation} 작업 중 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 재시도해 주세요.`
+    );
+  }
+
+  if (
+    code.startsWith("22") ||
+    code.startsWith("23") ||
+    code === "pgrst116"
+  ) {
+    return new Error(
+      `${operation} 작업을 완료할 수 없습니다. 입력값이나 이미 저장된 내용을 확인한 뒤 재시도해 주세요.`
+    );
+  }
+
+  return new Error(
+    `${operation} 작업에 실패했습니다. 잠시 후 다시 시도해 주세요.`
+  );
 }
 
 function definedPatch<T extends object>(patch: T): Partial<T> {
@@ -52,6 +110,35 @@ function normalizeLog(row: MedicationLog): MedicationLog {
   };
 }
 
+function normalizedNullableText(value: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
+}
+
+function isSameLogRequest(
+  row: MedicationLog,
+  input: RequiredAddMedicationLogInput
+): boolean {
+  return (
+    row.medication_id === input.medication_id &&
+    row.schedule_id === input.schedule_id &&
+    new Date(row.taken_at).getTime() === new Date(input.taken_at).getTime() &&
+    Number(row.quantity) === Number(input.quantity) &&
+    normalizedNullableText(row.note) === normalizedNullableText(input.note) &&
+    row.is_extra === input.is_extra
+  );
+}
+
+function existingLogForRequest(
+  row: MedicationLog,
+  input: RequiredAddMedicationLogInput
+): MedicationLog {
+  if (isSameLogRequest(row, input)) return normalizeLog(row);
+  throw new Error(
+    "같은 요청 ID로 이미 다른 내용의 투약 기록이 저장되어 있습니다. 기록을 새로고침한 뒤 다시 시도해 주세요."
+  );
+}
+
 export class SupabaseDbRepository implements DbRepository {
   async fetchCareSpaces(): Promise<CareSpaceAccess[]> {
     const client = requireSupabase();
@@ -75,6 +162,17 @@ export class SupabaseDbRepository implements DbRepository {
         ? [{ ...membership.care_space, role: membership.role }]
         : []
     );
+  }
+
+  async updateCareSpace(careSpaceId: string, name: string): Promise<CareSpace> {
+    const { data, error } = await requireSupabase()
+      .from("care_spaces")
+      .update({ name })
+      .eq("id", careSpaceId)
+      .select()
+      .single();
+    if (error) throw failure("복약 공간 이름 변경", error);
+    return data;
   }
 
   async fetchPendingCareSpaceInvites(): Promise<PendingCareSpaceInvite[]> {
@@ -186,6 +284,7 @@ export class SupabaseDbRepository implements DbRepository {
         .from("medication_logs")
         .select("*")
         .eq("care_space_id", careSpaceId)
+        .is("deleted_at", null)
         .order("taken_at", { ascending: true }),
       client
         .from("daily_status")
@@ -321,6 +420,19 @@ export class SupabaseDbRepository implements DbRepository {
     input: RequiredAddMedicationLogInput
   ): Promise<MedicationLog> {
     const client = requireSupabase();
+    const existingBeforeInsert = await client
+      .from("medication_logs")
+      .select("*")
+      .eq("care_space_id", careSpaceId)
+      .eq("client_request_id", input.client_request_id)
+      .maybeSingle();
+    if (existingBeforeInsert.error) {
+      throw failure("투약 기록 중복 확인", existingBeforeInsert.error);
+    }
+    if (existingBeforeInsert.data) {
+      return existingLogForRequest(existingBeforeInsert.data, input);
+    }
+
     const inserted = await client
       .from("medication_logs")
       .insert({ ...input, care_space_id: careSpaceId })
@@ -336,7 +448,12 @@ export class SupabaseDbRepository implements DbRepository {
         .eq("care_space_id", careSpaceId)
         .eq("client_request_id", input.client_request_id)
         .maybeSingle();
-      if (!existing.error && existing.data) return normalizeLog(existing.data);
+      if (existing.error) {
+        throw failure("투약 기록 중복 확인", existing.error);
+      }
+      if (existing.data) {
+        return existingLogForRequest(existing.data, input);
+      }
     }
 
     throw failure("투약 기록 저장", inserted.error);
@@ -393,14 +510,18 @@ export class SupabaseDbRepository implements DbRepository {
     careSpaceId: string,
     input: DailyStatusInput
   ): Promise<DailyStatus> {
-    const { data, error } = await requireSupabase()
-      .from("daily_status")
-      .upsert(
-        { ...input, care_space_id: careSpaceId },
-        { onConflict: "care_space_id,date" }
-      )
-      .select()
-      .single();
+    const { data, error } = await requireSupabase().rpc(
+      "upsert_daily_status",
+      {
+        p_breathing: input.breathing,
+        p_care_space_id: careSpaceId,
+        p_date: input.date,
+        p_eye_symptom: input.eye_symptom,
+        p_fatigue: input.fatigue,
+        p_note: input.note,
+        p_strength: input.strength,
+      }
+    );
     if (error) throw failure("상태 기록 저장", error);
     return data;
   }

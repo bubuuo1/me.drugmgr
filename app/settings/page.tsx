@@ -2,8 +2,9 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useId, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
+import { TimePicker } from "@/app/components/date-time-picker";
 import {
   ConfirmDialog,
   ErrorBanner,
@@ -16,8 +17,6 @@ import { useOnlineStatus } from "@/app/components/use-online-status";
 import { AccountSettingsCard } from "@/app/settings/account-settings-card";
 import { PushNotificationsCard } from "@/app/settings/push-notifications-card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { dismissScheduleNotifications } from "@/lib/push-client";
 import { useDb } from "@/lib/store";
 import type { Medication, MedicationSchedule } from "@/lib/types";
@@ -87,7 +86,7 @@ export default function SettingsPage() {
     addSchedule,
     updateSchedule,
     deleteSchedule,
-    canManageSettings,
+    canManageMedicationSettings,
   } = useDb();
 
   const [addingMedication, setAddingMedication] = useState(false);
@@ -371,7 +370,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (!canManageSettings) {
+  if (!canManageMedicationSettings) {
     return (
       <main className="flex flex-1 flex-col gap-7">
         <PageHeader title="환경설정" />
@@ -383,8 +382,8 @@ export default function SettingsPage() {
           onDismiss={clearError}
         />
         <Notice>
-          약과 일정은 이 가족 공간의 소유자만 변경할 수 있습니다. 현재는 등록된
-          설정을 조회하고 이 기기의 알림 수신 여부를 관리할 수 있습니다.
+          약과 일정은 이 가족 공간의 소유자와 보호자만 변경할 수 있습니다. 현재는
+          등록된 설정을 조회하고 이 기기의 알림 수신 여부를 관리할 수 있습니다.
         </Notice>
         <section aria-labelledby="medication-list-title" className="flex flex-col gap-4">
           <h2 id="medication-list-title" className="text-xl font-bold text-ink">
@@ -919,7 +918,7 @@ function ScheduleForm({
   const inputId = useId();
   const errorId = `${inputId}-error`;
   const {
-    register,
+    control,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -945,19 +944,22 @@ function ScheduleForm({
       <fieldset disabled={submitting} className="grid gap-4">
         <legend className="sr-only">{legend}</legend>
         <div className="grid gap-2">
-          <Label
-            htmlFor={inputId}
-            className="items-stretch text-base leading-normal font-bold text-body"
-          >
-            예정 시각
-          </Label>
-          <Input
-            id={inputId}
-            type="time"
-            aria-invalid={Boolean(errors.time)}
-            aria-describedby={errors.time ? errorId : undefined}
-            className="h-14 min-h-14 rounded-xl border-hairline bg-canvas px-4 text-lg font-normal text-ink focus-visible:border-ink focus-visible:ring-ink/20 md:text-lg"
-            {...register("time")}
+          <Controller
+            name="time"
+            control={control}
+            render={({ field }) => (
+              <TimePicker
+                id={inputId}
+                value={field.value}
+                label="예정 시각"
+                onChange={field.onChange}
+                onBlur={field.onBlur}
+                triggerRef={field.ref}
+                disabled={submitting}
+                invalid={Boolean(errors.time)}
+                describedBy={errors.time ? errorId : undefined}
+              />
+            )}
           />
           {errors.time?.message && (
             <p

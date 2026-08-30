@@ -293,7 +293,7 @@ function StatusEditor({
             }}
             disabled={pending}
             rows={4}
-            maxLength={1000}
+            maxLength={2000}
             className="min-h-32 w-full rounded-xl border border-hairline bg-canvas px-4 py-3 text-lg text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
             placeholder="예: 오후부터 평소보다 피곤했음"
           />

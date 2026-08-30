@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { DateTimePicker } from "@/app/components/date-time-picker";
 import {
   ConfirmDialog,
   ErrorBanner,
@@ -22,6 +23,11 @@ import { useDb } from "@/lib/store";
 import { isBooleanOnly, quantityOptionsOf } from "@/lib/types";
 
 const RECENT_DUPLICATE_MINUTES = 15;
+
+type LogFieldError = {
+  field: "quantity" | "takenAt";
+  message: string;
+};
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "기록을 저장하지 못했습니다.";
@@ -73,7 +79,7 @@ function MedLogInner() {
   const [note, setNote] = useState("");
   const [manualExtra, setManualExtra] = useState(requestedExtra);
   const [pending, setPending] = useState(false);
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<LogFieldError | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [confirmingDuplicate, setConfirmingDuplicate] = useState(false);
@@ -141,24 +147,69 @@ function MedLogInner() {
     );
   }
 
+  if (!requestedExtra && !schedule) {
+    return (
+      <main className="flex flex-1 flex-col gap-6">
+        <PageHeader title={medication.name} />
+        <Notice
+          tone="warning"
+          action={
+            <div className="grid gap-3">
+              <Link
+                href={`/log?med=${encodeURIComponent(medication.id)}&extra=1`}
+                replace
+                className="flex min-h-12 w-full items-center justify-center rounded-full border border-hairline bg-canvas px-5 text-base font-bold text-ink"
+              >
+                추가 복용으로 기록하기
+              </Link>
+              <Link
+                href="/"
+                replace
+                className="flex min-h-12 w-full items-center justify-center rounded-full bg-primary-active px-5 text-base font-bold text-on-primary"
+              >
+                첫 화면에서 다시 선택
+              </Link>
+            </div>
+          }
+        >
+          요청한 복용 일정을 찾을 수 없거나 현재 비활성화되어 있습니다. 추가
+          복용으로 자동 전환하지 않으니 기록 분류를 직접 선택해 주세요.
+        </Notice>
+      </main>
+    );
+  }
+
   const currentMedication = medication;
   const unit = currentMedication.unit || "회";
+
+  function clearFieldError(field: LogFieldError["field"]) {
+    setFieldError((current) => (current?.field === field ? null : current));
+  }
 
   function validate() {
     const parsedQuantity = booleanOnly ? 1 : Number(enteredQuantity);
     if (!booleanOnly && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
-      setFieldError("0보다 큰 복용 수량을 입력해 주세요.");
+      setFieldError({
+        field: "quantity",
+        message: "0보다 큰 복용 수량을 입력해 주세요.",
+      });
       return null;
     }
     if (!takenAt) {
-      setFieldError("실제 복용 시각을 입력해 주세요.");
+      setFieldError({
+        field: "takenAt",
+        message: "실제 복용 시각을 입력해 주세요.",
+      });
       return null;
     }
     let parsedTakenAt: Date;
     try {
       parsedTakenAt = new Date(parseKstDateTimeInput(takenAt));
     } catch {
-      setFieldError("실제 복용 시각을 다시 확인해 주세요.");
+      setFieldError({
+        field: "takenAt",
+        message: "실제 복용 시각을 다시 확인해 주세요.",
+      });
       return null;
     }
     setFieldError(null);
@@ -270,6 +321,7 @@ function MedLogInner() {
                 </button>
                 <Link
                   href="/"
+                  replace
                   className="flex min-h-14 w-full items-center justify-center rounded-full bg-primary-active px-6 text-lg font-bold text-on-primary"
                 >
                   첫 화면으로
@@ -316,7 +368,7 @@ function MedLogInner() {
                       aria-pressed={selected}
                       onClick={() => {
                         setQuantity(String(option));
-                        setFieldError(null);
+                        clearFieldError("quantity");
                       }}
                       className={
                         selected
@@ -343,10 +395,14 @@ function MedLogInner() {
                   value={enteredQuantity}
                   onChange={(event) => {
                     setQuantity(event.target.value);
-                    setFieldError(null);
+                    clearFieldError("quantity");
                   }}
-                  aria-describedby={fieldError ? "log-field-error" : undefined}
-                  aria-invalid={fieldError ? true : undefined}
+                  aria-describedby={
+                    fieldError?.field === "quantity"
+                      ? "log-field-error"
+                      : undefined
+                  }
+                  aria-invalid={fieldError?.field === "quantity" || undefined}
                   className="h-14 min-w-0 flex-1 rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink focus:border-2 focus:border-ink"
                 />
                 <span className="shrink-0 text-lg font-bold text-body">{unit}</span>
@@ -364,21 +420,21 @@ function MedLogInner() {
           )}
 
           <section className="flex flex-col gap-3">
-            <label htmlFor="taken-at" className="text-xl font-bold text-ink">
-              실제 복용 시각
-            </label>
-            <input
+            <DateTimePicker
               id="taken-at"
-              type="datetime-local"
               value={takenAt}
-              onChange={(event) => {
-                setTakenAt(event.target.value);
-                setFieldError(null);
+              label="실제 복용 시각"
+              onChange={(value) => {
+                setTakenAt(value);
+                clearFieldError("takenAt");
               }}
               disabled={pending}
-              aria-describedby={fieldError ? "log-field-error" : "taken-at-help"}
-              aria-invalid={fieldError ? true : undefined}
-              className="min-h-14 w-full rounded-xl border border-hairline bg-canvas px-4 text-lg text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
+              describedBy={
+                fieldError?.field === "takenAt"
+                  ? "log-field-error"
+                  : "taken-at-help"
+              }
+              invalid={fieldError?.field === "takenAt"}
             />
             <p id="taken-at-help" className="text-base leading-relaxed text-muted">
               현재 시각이 기본으로 입력되어 있습니다. 실제 복용 시각이 다르면 수정해 주세요.
@@ -394,7 +450,7 @@ function MedLogInner() {
               value={note}
               onChange={(event) => setNote(event.target.value)}
               disabled={pending}
-              maxLength={500}
+              maxLength={2000}
               rows={3}
               className="min-h-28 w-full rounded-xl border border-hairline bg-canvas px-4 py-3 text-lg text-ink focus:border-2 focus:border-ink disabled:bg-surface-soft"
               placeholder="복용 당시 상황을 남길 수 있습니다."
@@ -402,7 +458,7 @@ function MedLogInner() {
           </section>
 
           {fieldError && (
-            <FieldError id="log-field-error">{fieldError}</FieldError>
+            <FieldError id="log-field-error">{fieldError.message}</FieldError>
           )}
 
           <button

@@ -32,6 +32,7 @@ export function PageHeader({
       {backHref && (
         <Link
           href={backHref}
+          replace
           className="inline-flex min-h-12 max-w-full shrink-0 items-center justify-center rounded-full bg-surface-strong px-3 text-base font-bold text-ink active:bg-hairline-soft min-[400px]:px-4"
           aria-label={`${backLabel}으로 이동`}
         >

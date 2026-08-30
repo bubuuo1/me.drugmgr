@@ -33,6 +33,7 @@ export function BottomNavigation() {
           <Link
             key={item.href}
             href={item.href}
+            replace
             aria-current={
               current ? (pathname === item.href ? "page" : "location") : undefined
             }

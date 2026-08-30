@@ -326,6 +326,8 @@ components:
     typography: "{typography.caption-sm}"
 ---
 
+> **비규범 참고 자료:** 이 파일은 Airbnb 시각 언어를 분석한 원본 참고 자료다. 투약 관리 앱의 실제 화면 규칙과 토큰은 [`docs/03-ui.md`](docs/03-ui.md)와 `app/globals.css`가 정본이며, 값이 다르면 그 두 파일을 따른다.
+
 ## Overview
 
 Airbnb is the canonical example of a generous, photography-led consumer marketplace. The base canvas is **pure white** (`{colors.canvas}` — #ffffff) with deep near-black ink (`{colors.ink}` — #222222) for headlines and body, and a single voltage of **Rausch** (`{colors.primary}` — #ff385c) carrying every primary CTA, the search-button orb, the heart save state, and inline brand links. There is no secondary brand color in mainline marketing — the **Luxe purple** (`{colors.luxe}` — #460479) and **Plus magenta** (`{colors.plus}` — #92174d) tokens are sub-brand accents that only appear inside Airbnb Luxe / Plus contexts.
@@ -335,6 +337,7 @@ Type runs **Airbnb Cereal VF** (a custom variable font Airbnb licenses), with **
 The shape language is **soft**. Buttons are 8px radius (`{rounded.sm}`), property cards are ~14px (`{rounded.md}`), the search bar is fully pill-shaped (`{rounded.full}`), wishlist hearts and search orbs are circles (`{rounded.full}`), and category strip rounded corners run at 32px (`{rounded.xl}`). There is essentially no hard corner anywhere except the body grid itself — every interactive element is rounded.
 
 **Key Characteristics:**
+
 - Single accent color: `{colors.primary}` (#ff385c — "Rausch") carries every primary CTA, the search orb, the heart save state, and the brand wordmark. Used scarcely — most pages are 90% white + ink with one or two Rausch moments.
 - Custom variable type: `Airbnb Cereal VF`. Display weights sit at 500–700, body at 400. Modest weight is intentional — the system trusts photography for visual heft.
 - Three-product top nav: Homes, Experiences, Services — each with a hand-illustrated 32px icon and "NEW" badges (`{component.new-tag}`) on the two newer products. Active tab uses an underline rule (`{component.product-tab-active}`).
@@ -347,6 +350,7 @@ The shape language is **soft**. Buttons are 8px radius (`{rounded.sm}`), propert
 ## Colors
 
 ### Brand & Accent
+
 - **Rausch** (`{colors.primary}` — #ff385c): The single brand color. Used for primary CTA backgrounds (Reserve, Continue), the search orb, the heart save state on property cards, and inline brand links. The most recognizable color in consumer travel.
 - **Rausch Active** (`{colors.primary-active}` — #e00b41): The press / pointer-down variant — slightly more saturated. Used on `{component.button-primary-active}`.
 - **Rausch Disabled** (`{colors.primary-disabled}` — #ffd1da): A pale tint used on disabled CTAs.
@@ -354,16 +358,19 @@ The shape language is **soft**. Buttons are 8px radius (`{rounded.sm}`), propert
 - **Plus Magenta** (`{colors.plus}` — #92174d): Sub-brand accent for Airbnb Plus. Same scoping as Luxe — sub-product only.
 
 ### Surface
+
 - **Canvas** (`{colors.canvas}` — #ffffff): The default page floor for every public page. Airbnb does not have a dark mode on the public web.
 - **Surface Soft** (`{colors.surface-soft}` — #f7f7f7): The lightest fill — used on disabled fields, sub-nav hover backgrounds, and the inline search filter band.
 - **Surface Strong** (`{colors.surface-strong}` — #f2f2f2): Slightly heavier fill — circular icon-button surface (e.g., the breadcrumb back-arrow and listing toolbar buttons).
 
 ### Hairlines & Borders
+
 - **Hairline** (`{colors.hairline}` — #dddddd): The default 1px border tone — search bar dividers, table separators, footer column splitters, card 1px borders.
 - **Hairline Soft** (`{colors.hairline-soft}` — #ebebeb): A lighter divider used on long-scrolling editorial body separators.
 - **Border Strong** (`{colors.border-strong}` — #c1c1c1): A heavier stroke used on disabled outline buttons and form input outlines after focus.
 
 ### Text
+
 - **Ink** (`{colors.ink}` — #222222): The dominant text color on light surfaces. Display headlines, body paragraphs, primary nav links, and most inline link text. Never pure black.
 - **Body** (`{colors.body}` — #3f3f3f): A secondary running-text color used inside long-form review and amenity copy where ink would feel too heavy.
 - **Muted** (`{colors.muted}` — #6a6a6a): Sub-titles inside city link blocks ("Cottage rentals", "Villa rentals"), inactive product-tab labels, footer category sub-labels, "View all" links.
@@ -372,16 +379,19 @@ The shape language is **soft**. Buttons are 8px radius (`{rounded.sm}`), propert
 - **On Primary** (`{colors.on-primary}` — #ffffff): White text on Rausch CTAs.
 
 ### Semantic
+
 - **Error** (`{colors.primary-error-text}` — #c13515): Inline error text for form validation. Distinct from Rausch — slightly darker, more saturated red.
 - **Error Hover** (`{colors.primary-error-text-hover}` — #b32505): Darkens on link hover.
 - **Legal Link Blue** (`{colors.legal-link}` — #428bff): Inline links inside legal copy (Privacy, Terms). Only used inside the legal sub-band.
 
 ### Scrim
+
 - **Scrim** (`{colors.scrim}` — #000000 at 50% opacity): The global modal backdrop tone — date picker, login dialog, language picker. Stored as the base hex; opacity is applied at render time.
 
 ## Typography
 
 ### Font Family
+
 The system runs **Airbnb Cereal VF** for everything — display, body, navigation, captions, microcopy. Fallbacks walk `Circular, -apple-system, system-ui, Roboto, "Helvetica Neue", sans-serif`. **Circular** is the historic in-house typeface still kept as the first non-variable fallback; system stacks back it up.
 
 There is no separate display family. The variable font carries the entire scale.
@@ -410,16 +420,19 @@ There is no separate display family. The variable font carries the entire scale.
 | `{typography.nav-link}` | 16px | 600 | 1.25 | 0 | Top product-nav labels (Homes, Experiences, Services) |
 
 ### Principles
+
 Display weights stay modest. The homepage h1 at 28px / 700 is deliberately small — it tucks under the search bar so photography and the city-link grid carry visual hierarchy. The listing-detail h1 at 22px / 500 is even quieter; the listing photo banner does the work above it.
 
 The single typographically loud moment in the entire system is the **rating display** (`{typography.rating-display}` — 64px / 700) on listing pages. That is the only place the system trusts type alone to carry hierarchy — rating numbers are a peak trust signal, so they get the loudest treatment.
 
 ### Note on Font Substitutes
+
 If Airbnb Cereal VF and Circular are unavailable, **Inter** is the closest open-source substitute. Adjust display headlines down by ~2% in line-height to match Cereal's slightly tighter cap height; otherwise the proportions transfer cleanly.
 
 ## Layout
 
 ### Spacing System
+
 - **Base unit:** 4px (with 2px micro-step).
 - **Tokens:** `{spacing.xxs}` 2px · `{spacing.xs}` 4px · `{spacing.sm}` 8px · `{spacing.md}` 12px · `{spacing.base}` 16px · `{spacing.lg}` 24px · `{spacing.xl}` 32px · `{spacing.xxl}` 48px · `{spacing.section}` 64px.
 - **Section padding (vertical):** `{spacing.section}` (64px) for major page bands; tighter than typical SaaS marketing (80–96px) because marketplace pages need higher card density per scroll.
@@ -427,12 +440,14 @@ If Airbnb Cereal VF and Circular are unavailable, **Inter** is the closest open-
 - **Gutters:** `{spacing.base}` (16px) between cards in the homepage city grid; `{spacing.lg}` (24px) inside footer column gutters; `{spacing.xs}` (4px) on dense category-strip dividers.
 
 ### Grid & Container
+
 - **Max content width:** ~1280px centered on the homepage and editorial pages. Listing detail pages cap closer to 1080px to keep the photo banner and reservation rail readable.
 - **City link grid (homepage footer):** 6-column grid at desktop with each cell housing a city name in `{typography.title-md}` and a category sub-label in `{typography.body-sm}` muted.
 - **Listing detail:** 2-column with photo / amenity body on the left (~64% width) and a sticky reservation card (`{component.reservation-card}`) on the right (~32%).
 - **Footer:** 3-column link list (Support / Hosting / Airbnb) at desktop, collapsing to 1-column on mobile.
 
 ### Whitespace Philosophy
+
 The system gives editorial bands 64px of vertical breathing room but compresses card grids — property and city-link cards sit just 16px apart. The contrast is intentional: the page reads as "open hero, dense marketplace below," reinforcing the marketplace nature without overwhelming the visitor at the fold.
 
 ## Elevation
@@ -525,12 +540,14 @@ There are no progressive elevation tiers — the system either has the one shado
 | Wide | > 1440px | Content width caps at 1440px on listing/search pages and ~1280px on editorial; gutters absorb the rest. |
 
 ### Touch Targets
+
 - Primary CTAs at minimum 48×48px (above WCAG AAA).
 - Search orb is 48×48px circular — the most-tapped element on the page.
 - Heart save button is 32×32px circular — borderline for AAA but compensated by a generous 12px padding inside the photo card.
 - Date-picker day cells are 40×40px circular.
 
 ### Collapsing Strategy
+
 - Top product tabs collapse into a hamburger sheet below 744px.
 - Search bar's 3 segments collapse into a single-tap entry that opens a full-screen search overlay on mobile.
 - Property and city-link grids drop column counts cleanly at each breakpoint — never reflow rows; always reduce columns.
