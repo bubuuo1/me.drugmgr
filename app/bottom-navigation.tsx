@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useDb } from "@/lib/store";
 
 const items = [
-  { href: "/", label: "첫 화면" },
+  { href: "/", label: "복용관리" },
   { href: "/records", label: "복용기록" },
   { href: "/settings", label: "환경설정" },
 ] as const;

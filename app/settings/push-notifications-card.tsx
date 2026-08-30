@@ -344,14 +344,6 @@ export function PushNotificationsCard({ online }: { online: boolean }) {
         <h2 id="push-notification-title" className="text-xl font-bold text-ink">
           투약 일정 알림
         </h2>
-        <p className="text-base leading-relaxed text-body">
-          이 기기에서 알림을 받을 가족 공간을 각각 선택할 수 있습니다. 가족
-          가족 기록 관리 요청을 수락해도 알림은 자동으로 켜지지 않습니다.
-        </p>
-        <p className="text-base leading-relaxed text-body">
-          등록한 각 복용·알림 시간부터 5분마다 반복하고, 해당 시간의 기록이
-          생기거나 시간을 끄거나 삭제하면 반복을 중단합니다.
-        </p>
         <p
           role={deviceState === "error" ? "alert" : "status"}
           className="text-base font-semibold text-ink"

@@ -294,7 +294,7 @@ test("주요 메뉴와 환경설정 하위 화면은 방문 기록을 불필요�
     page.getByRole("heading", { level: 1, name: "환경설정" })
   ).toHaveClass(/sr-only/);
   await navigation
-    .getByRole("link", { name: "첫 화면", exact: true })
+    .getByRole("link", { name: "복용관리", exact: true })
     .click();
   await expect(page).toHaveURL(/\/$/);
   await expect
@@ -600,7 +600,7 @@ test("가족 공간을 바꾸면 이전 사람의 작성 중 상태와 데이터
   await spaceSelect.selectOption("mock-second-care-space");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(spaceSelect).toHaveValue("mock-second-care-space");
-  await page.getByRole("link", { name: "첫 화면", exact: true }).click();
+  await page.getByRole("link", { name: "복용관리", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   const emptyMedicationMessage = page.getByText("활성화된 약이 없습니다.");
   await expect(emptyMedicationMessage).toBeVisible();
@@ -1025,7 +1025,10 @@ test("설정에서 기기 알림을 관리하고 발송 API는 비밀값을 요�
     has: page.getByRole("heading", { level: 2, name: "투약 일정 알림" }),
   });
   await expect(notificationSection).toBeVisible();
-  await expect(notificationSection).toContainText("5분마다");
+  await expect(notificationSection).not.toContainText(
+    "이 기기에서 알림을 받을 가족 공간"
+  );
+  await expect(notificationSection).not.toContainText("5분마다 반복");
 
   const unauthorized = await page.request.post("/api/push/dispatch", {
     headers: { Authorization: "Bearer wrong-secret" },
@@ -1241,7 +1244,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
 
   await page
     .getByRole("navigation", { name: "주요 메뉴" })
-    .getByRole("link", { name: "첫 화면", exact: true })
+    .getByRole("link", { name: "복용관리", exact: true })
     .click();
   const homeMedicationCard = page.getByRole("article").filter({
     has: page.getByRole("heading", {
@@ -1416,7 +1419,7 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
 
   await page
     .getByRole("navigation", { name: "주요 메뉴" })
-    .getByRole("link", { name: "첫 화면", exact: true })
+    .getByRole("link", { name: "복용관리", exact: true })
     .click();
   await page
     .getByRole("link", { name: "복용기록 확인", exact: true })
