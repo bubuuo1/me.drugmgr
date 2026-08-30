@@ -27,6 +27,7 @@ import type {
   DB,
   DailyStatus,
   DailyStatusInput,
+  FamilyRelationship,
   Medication,
   MedicationLog,
   MedicationSchedule,
@@ -261,6 +262,7 @@ export type DbContextValue = {
   careSpaceMembers: CareSpaceMemberWithProfile[];
   careSpaceInvites: CareSpaceInvite[];
   pendingCareSpaceInvites: PendingCareSpaceInvite[];
+  familyRelationships: FamilyRelationship[];
   canManageMedicationSettings: boolean;
   canManageFamily: boolean;
   canWriteRecords: boolean;
@@ -281,6 +283,11 @@ export type DbContextValue = {
   ): Promise<void>;
   declineCareSpaceInvite(inviteId: string): Promise<void>;
   revokeCareSpaceInvite(inviteId: string): Promise<void>;
+  upgradeFamilyRelationshipToReciprocal(
+    relationshipId: string,
+    callerCareSpaceId: string
+  ): Promise<void>;
+  endFamilyRelationship(relationshipId: string): Promise<void>;
   removeCareSpaceMember(userId: string): Promise<void>;
   clearError(): void;
   addMedication(input: AddMedicationInput): Promise<Medication>;
@@ -316,6 +323,9 @@ export function DbProvider({ children }: PropsWithChildren) {
   >({});
   const [pendingCareSpaceInvites, setPendingCareSpaceInvites] = useState<
     PendingCareSpaceInvite[]
+  >([]);
+  const [familyRelationships, setFamilyRelationships] = useState<
+    FamilyRelationship[]
   >([]);
   const [pendingCount, setPendingCount] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -561,17 +571,19 @@ export function DbProvider({ children }: PropsWithChildren) {
     const space = requireSelectedCareSpace();
     const selectionGeneration = dataRequests.selectionSnapshot();
     const result = await run(async () => {
-      const [members, invites, pendingInvites] = await Promise.all([
+      const [members, invites, pendingInvites, relationships] = await Promise.all([
         repository.fetchCareSpaceMembers(space.id),
         space.role === "owner"
           ? repository.fetchCareSpaceInvites(space.id)
           : Promise.resolve([]),
         repository.fetchPendingCareSpaceInvites(),
+        repository.fetchFamilyRelationships(),
       ]);
-      return { members, invites, pendingInvites };
+      return { members, invites, pendingInvites, relationships };
     });
     if (!dataRequests.isSelected(space.id, selectionGeneration)) return;
     setPendingCareSpaceInvites(result.pendingInvites);
+    setFamilyRelationships(result.relationships);
     setCareSpaceMembersBySpace((current) => ({
       ...current,
       [space.id]: result.members,
@@ -643,6 +655,9 @@ export function DbProvider({ children }: PropsWithChildren) {
         current.filter((invite) => invite.id !== inviteId)
       );
       await refreshCareSpaces(member.care_space_id);
+      setFamilyRelationships(
+        await run(() => repository.fetchFamilyRelationships())
+      );
     },
     [refreshCareSpaces, run]
   );
@@ -670,6 +685,39 @@ export function DbProvider({ children }: PropsWithChildren) {
       }
     },
     [dataRequests, requireOwnerSpace, run]
+  );
+
+  const upgradeFamilyRelationshipToReciprocal = useCallback(
+    async (relationshipId: string, callerCareSpaceId: string) => {
+      const callerSpace = careSpaces.find(
+        (space) => space.id === callerCareSpaceId && space.role === "owner"
+      );
+      if (!callerSpace) {
+        throw new Error("본인이 소유한 복약 공간을 선택해 주세요.");
+      }
+      await run(() =>
+        repository.upgradeFamilyRelationshipToReciprocal(
+          relationshipId,
+          callerSpace.id
+        )
+      );
+      await refreshCareSpaces();
+      setFamilyRelationships(
+        await run(() => repository.fetchFamilyRelationships())
+      );
+    },
+    [careSpaces, refreshCareSpaces, run]
+  );
+
+  const endFamilyRelationship = useCallback(
+    async (relationshipId: string) => {
+      await run(() => repository.endFamilyRelationship(relationshipId));
+      setFamilyRelationships((current) =>
+        current.filter((relationship) => relationship.id !== relationshipId)
+      );
+      await refreshCareSpaces();
+    },
+    [refreshCareSpaces, run]
   );
 
   const removeCareSpaceMember = useCallback(
@@ -701,6 +749,7 @@ export function DbProvider({ children }: PropsWithChildren) {
     setCareSpaceMembersBySpace({});
     setCareSpaceInvitesBySpace({});
     setPendingCareSpaceInvites([]);
+    setFamilyRelationships([]);
     setPendingCount(0);
     setInitialized(false);
     setError(null);
@@ -1091,6 +1140,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       careSpaceMembers,
       careSpaceInvites,
       pendingCareSpaceInvites,
+      familyRelationships,
       canManageMedicationSettings,
       canManageFamily,
       canWriteRecords,
@@ -1108,6 +1158,8 @@ export function DbProvider({ children }: PropsWithChildren) {
       acceptCareSpaceInvite,
       declineCareSpaceInvite,
       revokeCareSpaceInvite,
+      upgradeFamilyRelationshipToReciprocal,
+      endFamilyRelationship,
       removeCareSpaceMember,
       clearError,
       addMedication,
@@ -1132,6 +1184,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       careSpaceMembers,
       careSpaceInvites,
       pendingCareSpaceInvites,
+      familyRelationships,
       canManageMedicationSettings,
       canManageFamily,
       canWriteRecords,
@@ -1148,6 +1201,8 @@ export function DbProvider({ children }: PropsWithChildren) {
       acceptCareSpaceInvite,
       declineCareSpaceInvite,
       revokeCareSpaceInvite,
+      upgradeFamilyRelationshipToReciprocal,
+      endFamilyRelationship,
       removeCareSpaceMember,
       clearError,
       addMedication,

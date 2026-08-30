@@ -368,10 +368,10 @@ test("가족 기록 관리 요청을 보내고 명시적으로 동의해 수락�
     .click();
 
   await expect(
-    page.getByText(new RegExp(`${inviteEmail} 주소로 복약 기록 관리 요청을 보냈습니다`))
+    page.getByText(new RegExp(`${inviteEmail} 주소로 양방향 복약 관리 요청을 보냈습니다`))
   ).toBeVisible();
   const inviteRow = page.getByRole("listitem").filter({ hasText: inviteEmail });
-  await expect(inviteRow).toContainText("보호자 권한 요청");
+  await expect(inviteRow).toContainText("양방향 보호자 요청");
 
   await page
     .getByLabel("관리 요청을 보낼 이메일", { exact: true })
@@ -387,50 +387,79 @@ test("가족 기록 관리 요청을 보내고 명시적으로 동의해 수락�
 
   const receivedRequest = page
     .getByRole("listitem")
-    .filter({ hasText: "내 기록 보호자 권한 요청" });
+    .filter({ hasText: "양방향 보호자 권한 요청" });
   const acceptButton = receivedRequest.getByRole("button", {
     name: "동의하고 수락",
     exact: true,
   });
   await expect(acceptButton).toBeDisabled();
   await receivedRequest
-    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .getByLabel("서로 관리할 내 복약 공간", { exact: true })
     .selectOption("mock-care-space");
   await receivedRequest
     .getByRole("checkbox", {
-      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+      name: /나도 상대의 요청 공간을 보호자로 관리하는 양방향 권한/,
     })
     .check();
   await expect(acceptButton).toBeEnabled();
   await receivedRequest
-    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .getByLabel("서로 관리할 내 복약 공간", { exact: true })
     .selectOption("");
   await expect(acceptButton).toBeDisabled();
   await receivedRequest
-    .getByLabel("관리 대상으로 공유할 내 복약 공간", { exact: true })
+    .getByLabel("서로 관리할 내 복약 공간", { exact: true })
     .selectOption("mock-care-space");
   await expect(
     receivedRequest.getByRole("checkbox", {
-      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+      name: /나도 상대의 요청 공간을 보호자로 관리하는 양방향 권한/,
     })
   ).not.toBeChecked();
   await expect(acceptButton).toBeDisabled();
   await receivedRequest
     .getByRole("checkbox", {
-      name: /선택한 공간의 복약 기록 관리 권한을 초대한 사람에게 공유/,
+      name: /나도 상대의 요청 공간을 보호자로 관리하는 양방향 권한/,
     })
     .check();
   await acceptButton.click();
   await expect(
-    page.getByText("복약 기록 관리 요청을 수락했습니다.", { exact: false })
+    page.getByText("양방향 가족 관계를 수락했습니다.", { exact: false })
   ).toBeVisible();
   const acceptedCaregiver = page
+    .locator("section")
+    .filter({ hasText: `${renamedSpace} 구성원` })
     .getByRole("listitem")
     .filter({ hasText: "초대한 가족" });
   await expect(acceptedCaregiver).toContainText("보호자");
-  await expect(page.getByText("요청자 비공개 공간", { exact: true })).toHaveCount(
-    0
-  );
+  const acceptedRelationship = page
+    .getByRole("listitem")
+    .filter({ hasText: "서로 복약 기록 관리 중" });
+  await expect(acceptedRelationship).toContainText("초대한 가족");
+  await expect(
+    acceptedRelationship.getByRole("link", {
+      name: "요청자 비공개 공간 관리",
+      exact: true,
+    })
+  ).toHaveAttribute("href", "/?space=mock-invite-source-care-space");
+
+  await acceptedRelationship
+    .getByRole("button", { name: "가족 관계 종료", exact: true })
+    .click();
+  const endDialog = page.getByRole("dialog", {
+    name: "가족 관계를 종료할까요?",
+  });
+  await endDialog
+    .getByRole("button", { name: "가족 관계 종료", exact: true })
+    .click();
+  await expect(
+    page.getByText("가족 관계를 종료했습니다.", { exact: false })
+  ).toBeVisible();
+  await expect(acceptedRelationship).toHaveCount(0);
+  await expect(acceptedCaregiver).toHaveCount(0);
+
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("combobox", { name: "기록 대상", exact: true })
+  ).not.toContainText("요청자 비공개 공간");
 });
 
 test("보호자는 가족 구성원을 확인하고 약과 임의 시각을 설정할 수 있다", async ({

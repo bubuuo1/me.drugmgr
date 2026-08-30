@@ -45,6 +45,7 @@ export type CareSpaceInvite = {
   care_space_id: string;
   email: string;
   role: CareSpaceInviteRole;
+  reciprocal_management: boolean;
   inviter_caregiver_care_space_id: string | null;
   status: CareSpaceInviteStatus;
   invited_by: string;
@@ -53,6 +54,20 @@ export type CareSpaceInvite = {
   responded_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type FamilyRelationship = {
+  id: string;
+  other_user_id: string;
+  other_display_name: string;
+  caller_can_manage_other_records: boolean;
+  other_can_manage_caller_records: boolean;
+  manageable_care_space_id: string | null;
+  manageable_care_space_name: string | null;
+  caller_shared_care_space_id: string | null;
+  caller_shared_care_space_name: string | null;
+  can_upgrade_to_reciprocal: boolean;
+  started_at: string;
 };
 
 export type PendingCareSpaceInvite = Pick<
@@ -228,6 +243,7 @@ type CareSpaceInviteInsert = Pick<
   "care_space_id" | "email" | "role" | "invited_by"
 > & {
   id?: string;
+  reciprocal_management?: boolean;
   inviter_caregiver_care_space_id?: string | null;
   accepted_by?: string | null;
   expires_at?: string;
@@ -480,6 +496,7 @@ export type Database = {
         Args: {
           p_care_space_id: string;
           p_email: string;
+          p_reciprocal_management: true;
           p_expires_at?: string;
           p_role: "caregiver";
         };
@@ -493,8 +510,24 @@ export type Database = {
         Args: {
           p_invite_id: string;
           p_inviter_caregiver_care_space_id: string | null;
+          p_reciprocal_management: true;
         };
         Returns: CareSpaceMember;
+      };
+      get_family_relationships: {
+        Args: Record<string, never>;
+        Returns: FamilyRelationship[];
+      };
+      upgrade_family_relationship_to_reciprocal: {
+        Args: {
+          p_relationship_id: string;
+          p_caller_care_space_id: string;
+        };
+        Returns: string;
+      };
+      end_family_relationship: {
+        Args: { p_relationship_id: string };
+        Returns: string;
       };
       decline_care_space_invite: {
         Args: { p_invite_id: string };

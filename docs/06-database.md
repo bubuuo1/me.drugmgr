@@ -21,8 +21,10 @@
 - `medication_logs`
 - `daily_status`
 
-Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마의 다음 테이블에 저장한다.
+가족 관계 감사와 Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마의 다음 테이블에 저장한다.
 
+- `family_relationships`
+- `family_relationship_accesses`
 - `push_subscriptions`
 - `push_subscription_spaces`
 - `push_deliveries`
@@ -51,9 +53,19 @@ Web Push 운영 데이터는 Data API에 노출하지 않는 `private` 스키마
 
 ### 2.4 `care_space_invites`
 
-소유자가 만든 가족 기록 관리 요청이다. `care_space_id`는 요청자가 요청을 만들 자격이 있는 소유자 공간과 발신 내역의 문맥을 보존하고, 소문자로 정규화한 `email`, `caregiver` 역할, 상태, `invited_by`, `accepted_by`, `inviter_caregiver_care_space_id`, 만료·응답·생성·수정 시각을 저장한다. `inviter_caregiver_care_space_id`는 수신자가 수락 시 직접 선택한 자기 소유 공간이며, 요청자가 보호자로 추가되는 실제 대상과 동의 감사 기록이다. 신규 생성 RPC는 `caregiver`만 허용하지만 과거 `viewer` 행 보존을 위해 테이블 제약은 두 역할을 유지한다. 상태는 `pending/accepted/declined/revoked/expired`만 허용하고 한 발신 문맥 공간과 이메일에는 대기 요청 하나만 존재한다.
+소유자가 만든 가족 기록 관리 요청이다. `care_space_id`는 요청자가 소유한 공유 원본 공간, `inviter_caregiver_care_space_id`는 수신자가 수락할 때 직접 선택한 자기 소유 공간이다. 소문자로 정규화한 `email`, `caregiver` 역할, `reciprocal_management`, 상태, `invited_by`, `accepted_by`, 만료·응답·생성·수정 시각을 함께 저장한다. 새 생성 RPC는 `reciprocal_management = true`와 `caregiver`만 허용하지만 과거 행 보존을 위해 테이블에는 단방향·`viewer` 이력이 남을 수 있다. 상태는 `pending/accepted/declined/revoked/expired`만 허용하고 한 발신 공간과 이메일에는 대기 요청 하나만 존재한다.
 
-생성·수락·거절·취소는 제한 RPC를 사용한다. 생성은 자기 이메일을 거부하고, 수락·거절은 `auth.users.email`의 확인된 이메일이 요청 이메일과 일치해야 하며 클라이언트의 `user_metadata` 이메일을 권한 근거로 사용하지 않는다. 수락 RPC는 수신자가 대상 공간의 현재 `owner`인지, 요청자가 발신 문맥 공간의 현재 `owner`인지 잠금 안에서 다시 검사한 뒤 요청자를 대상 공간의 `caregiver`로 추가하고 요청 상태와 대상 공간을 함께 기록한다. 수신자를 발신 문맥 공간에 추가하지 않는다. 받은 대기 요청 목록은 요청자의 표시 이름과 처리에 필요한 최소 필드만 반환하고 요청자 공간 ID·이름은 공개하지 않는다. 대기·거절·취소·만료 상태에는 대상 공간을 저장하지 않으며, 이미 수락된 과거 행의 `null` 대상은 자동 보정하지 않는다. 수락자 계정이 삭제되면 FK 정책에 따라 `accepted_by`는 `null`이 될 수 있지만 응답 시각과 선택 대상은 유지한다.
+생성·수락·거절·취소는 제한 RPC를 사용한다. 생성은 자기 이메일을 거부하고, 수락·거절은 `auth.users.email`의 확인된 이메일이 요청 이메일과 일치해야 하며 클라이언트의 `user_metadata` 이메일을 권한 근거로 사용하지 않는다. 새 수락 RPC는 수신자가 선택 공간의 현재 `owner`인지, 요청자가 발신 공간의 현재 `owner`인지 잠금 안에서 다시 검사한다. 수락과 요청 모두 양방향 동의를 포함한 경우에만 요청자를 수신자 선택 공간의 `caregiver`, 수신자를 요청자 발신 공간의 `caregiver`로 추가하고 요청 상태·선택 공간·관계 감사 정보를 한 트랜잭션에 기록한다. 두 공간과 건강 기록은 병합하거나 복제하지 않는다.
+
+받은 대기 요청 목록은 요청자의 표시 이름과 처리에 필요한 최소 필드만 반환하고 동의 전에는 요청자 공간 ID·이름을 공개하지 않는다. 대기·거절·취소·만료 상태에는 대상 공간을 저장하지 않는다. 이전 단방향 의미로 만들어진 대기 요청은 양방향 동의로 재해석하지 않고 취소하며, 이미 수락된 과거 행의 대상과 멤버십도 반대 방향으로 자동 보정하지 않는다.
+
+### 2.5 `private.family_relationships`와 `private.family_relationship_accesses`
+
+`family_relationships`는 수락된 두 사용자의 활성 가족 관계와 시작·양방향 전환·종료 감사 시각 및 사용자를 보존한다. 사용자 UUID를 정렬해 같은 두 사용자 사이에는 활성 관계 하나만 허용한다. `family_relationship_accesses`는 관계가 부여한 각 한 방향 보호자 접근의 복약 공간, 소유자, 접근 사용자, 근거 초대와 이전 멤버십 역할을 저장한다. 관계 종료 시 관계가 새로 만든 멤버십은 제거하고, 기존 조회자·보호자 멤버십을 승격했던 경우에는 이전 역할과 `invited_by`를 복원한다. 출처를 안전하게 증명할 수 없는 과거 멤버십은 임의로 제거하거나 역할을 낮추지 않는다.
+
+`20260830070000_reciprocal_family_relationships.sql` 적용 시 실제 멤버십이 남아 있는 과거 accepted 초대만 단방향 관계로 연결하고 반대 방향 접근은 만들지 않는다. 대상 공간이 없는 과거 행은 수신자가 요청자 발신 공간을 관리한 방향, 대상 공간이 있는 과거 행은 요청자가 수신자 선택 공간을 관리한 방향으로 보존한다. 두 참여자는 `get_family_relationships`의 최소 반환값으로 현재 방향과 공간 이름을 확인한다.
+
+현재 상대 기록을 관리하는 참여자는 `upgrade_family_relationship_to_reciprocal`에 자신이 소유한 공간을 명시해 반대 방향 접근을 추가할 수 있다. `end_family_relationship`은 어느 참여자나 호출할 수 있고 관계의 활성 접근을 모두 종료한다. 양방향이면 두 접근을 함께 끝내고 단방향이면 기존 접근만 끝내며 건강 기록 행은 삭제하지 않는다. `remove_care_space_member`와 멤버십 보호 트리거는 활성 관계가 추적하는 멤버십의 한쪽 변경·제거를 거부해 관계와 접근 상태가 어긋나지 않게 한다. 이 관계·접근 테이블은 RLS를 켜고 `anon`과 `authenticated`의 직접 테이블 권한을 제거하며, 브라우저에는 제한 RPC만 공개한다.
 
 ## 3. medications
 
@@ -231,6 +243,9 @@ private 테이블에는 RLS를 활성화하고 `anon`과 `authenticated`에 테�
 
 - `care_space_members(user_id, care_space_id)`
 - `care_space_invites(care_space_id, email)` 대기 상태 부분 unique
+- `private.family_relationships(user_a_id, user_b_id) where ended_at is null` unique
+- `private.family_relationship_accesses(care_space_id, grantee_user_id) where ended_at is null` unique
+- 활성 가족 관계와 접근을 참여자·관계별로 찾기 위한 부분 인덱스
 - `medication_logs(care_space_id, client_request_id)` unique
 - `daily_status(care_space_id, date)` unique
 - `medication_logs(taken_at)`
@@ -283,6 +298,10 @@ FK 삭제 정책은 과거 로그를 연쇄 삭제하지 않아야 한다. 일�
 `20260830050006_restrict_medication_log_classification.sql`은 투약 로그의 `schedule_id`와 `is_extra` 직접 update 권한을 제거한다. 작성 권한, 대상 로그와 실제 일정·약의 관계를 검사하는 제한 RPC만 일정 연결 또는 추가 복용으로 명시적 재분류하며, 일정 삭제 FK가 만든 `schedule_id = null`, `is_extra = false` 과거 스냅샷은 일반 편집에서 그대로 보존한다.
 
 `20260830060000_manage_invited_family_records.sql`은 가족 초대를 수신자의 명시적 동의 기반 기록 관리 요청으로 전환한다. 수신자가 선택한 자기 소유 공간을 감사 필드에 남기고 요청자를 그 공간의 보호자로 추가한다. 반대 방향 의미였던 기존 대기 초대는 수신자 기록 공유 동의로 재해석하지 않고 취소하며, 기존 수락 행과 기존 멤버십도 변환하지 않는다. 수신자는 발신 문맥 공간에 자동 추가하지 않는다. 대상 공간을 받지 않는 이전 수락 함수는 건강 기록 공간을 추론하지 않고 실패하도록 유지해 앱과 DB의 순차 배포 중 잘못된 권한 생성을 막는다.
+
+`20260830070000_reciprocal_family_relationships.sql`은 이후 새 요청을 명시적 양방향 보호자 요청으로 전환하고, 이전 문구로 만들어진 대기 요청을 재사용하지 않고 취소한다. 새 수락은 요청자와 수신자를 각각 상대 소유 공간의 보호자로 원자적으로 추가한다. 실제 멤버십이 남아 있는 기존 accepted 행은 현재 한 방향만 추적하는 관계로 보존해 양쪽 화면에 표시하되 반대 방향 권한을 만들지 않는다. 현재 상대 기록을 관리하는 참여자의 별도 공간 선택·동의로만 양방향 전환하고, 어느 참여자든 관계를 종료할 수 있다. 관계 접근은 부여 전 역할을 보존해 종료 때 안전하게 제거하거나 복원하며, 활성 관계 멤버십의 일반 한쪽 제거를 막는다. 새 대상 공간이나 양방향 동의를 전달하지 못하는 이전 생성·수락 함수는 실패하도록 유지한다.
+
+`20260830070001_index_family_relationship_audit_foreign_keys.sql`은 관계·접근 감사 외래키에 null 제외 부분 인덱스를 추가해 사용자·초대 삭제 시 참조 검사와 감사 조회가 전체 테이블 순차 검색으로 커지지 않게 한다.
 
 마이그레이션 적용 전 운영 DB를 백업한다. 적용 뒤에는 실제 기존 데이터 소유자를 확인해 미지정 공간에 소유자 멤버십을 수동으로 추가해야 한다. 자동으로 첫 로그인 사용자에게 할당하면 잘못된 사람에게 건강 기록이 노출될 수 있으므로 금지한다.
 

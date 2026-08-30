@@ -12,6 +12,7 @@ import type {
   DB,
   DailyStatus,
   DailyStatusInput,
+  FamilyRelationship,
   Medication,
   MedicationLog,
   MedicationSchedule,
@@ -184,6 +185,15 @@ export class SupabaseDbRepository implements DbRepository {
     return data;
   }
 
+  async fetchFamilyRelationships(): Promise<FamilyRelationship[]> {
+    const { data, error } = await requireSupabase().rpc(
+      "get_family_relationships",
+      {}
+    );
+    if (error) throw failure("수락한 가족 관계 조회", error);
+    return data;
+  }
+
   async fetchCareSpaceMembers(
     careSpaceId: string
   ): Promise<CareSpaceMemberWithProfile[]> {
@@ -217,6 +227,7 @@ export class SupabaseDbRepository implements DbRepository {
       {
         p_care_space_id: careSpaceId,
         p_email: input.email,
+        p_reciprocal_management: true,
         p_role: input.role,
         ...(input.expires_at === undefined
           ? {}
@@ -236,6 +247,7 @@ export class SupabaseDbRepository implements DbRepository {
       {
         p_invite_id: inviteId,
         p_inviter_caregiver_care_space_id: inviterCaregiverCareSpaceId,
+        p_reciprocal_management: true,
       }
     );
     if (error) throw failure("가족 기록 관리 요청 수락", error);
@@ -257,6 +269,30 @@ export class SupabaseDbRepository implements DbRepository {
       { p_invite_id: inviteId }
     );
     if (error) throw failure("가족 기록 관리 요청 취소", error);
+    return data;
+  }
+
+  async upgradeFamilyRelationshipToReciprocal(
+    relationshipId: string,
+    callerCareSpaceId: string
+  ): Promise<string> {
+    const { data, error } = await requireSupabase().rpc(
+      "upgrade_family_relationship_to_reciprocal",
+      {
+        p_relationship_id: relationshipId,
+        p_caller_care_space_id: callerCareSpaceId,
+      }
+    );
+    if (error) throw failure("가족 관계 양방향 전환", error);
+    return data;
+  }
+
+  async endFamilyRelationship(relationshipId: string): Promise<string> {
+    const { data, error } = await requireSupabase().rpc(
+      "end_family_relationship",
+      { p_relationship_id: relationshipId }
+    );
+    if (error) throw failure("가족 관계 종료", error);
     return data;
   }
 

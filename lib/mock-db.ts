@@ -11,6 +11,7 @@ import type {
   DB,
   DailyStatus,
   DailyStatusInput,
+  FamilyRelationship,
   Medication,
   MedicationLog,
   MedicationSchedule,
@@ -127,6 +128,7 @@ const careSpaceInvites: CareSpaceInvite[] = [
     care_space_id: MOCK_INVITE_SOURCE_CARE_SPACE_ID,
     email: MOCK_USER_EMAIL,
     role: "caregiver",
+    reciprocal_management: true,
     inviter_caregiver_care_space_id: null,
     status: "pending",
     invited_by: MOCK_SECOND_OWNER_ID,
@@ -137,6 +139,8 @@ const careSpaceInvites: CareSpaceInvite[] = [
     updated_at: SEED_TIME,
   },
 ];
+
+const familyRelationships: FamilyRelationship[] = [];
 
 const memoryDb: DB = {
   medications: [
@@ -338,6 +342,10 @@ export class MockDbRepository implements DbRepository {
     );
   }
 
+  async fetchFamilyRelationships(): Promise<FamilyRelationship[]> {
+    return clone(familyRelationships);
+  }
+
   async fetchCareSpaceMembers(
     careSpaceId: string
   ): Promise<CareSpaceMemberWithProfile[]> {
@@ -399,6 +407,7 @@ export class MockDbRepository implements DbRepository {
       care_space_id: careSpaceId,
       email,
       role: input.role,
+      reciprocal_management: true,
       inviter_caregiver_care_space_id: null,
       status: "pending",
       invited_by: MOCK_USER_ID,
@@ -458,6 +467,9 @@ export class MockDbRepository implements DbRepository {
     if (current.role !== "caregiver") {
       throw new Error("보호자 권한 관리 요청만 수락할 수 있습니다.");
     }
+    if (!current.reciprocal_management) {
+      throw new Error("양방향 관리 동의가 포함된 요청만 수락할 수 있습니다.");
+    }
     if (current.email.toLocaleLowerCase() !== MOCK_USER_EMAIL) {
       throw new Error("이 계정으로 받은 관리 요청이 아닙니다.");
     }
@@ -491,6 +503,15 @@ export class MockDbRepository implements DbRepository {
     if (requesterOwnsTarget) {
       throw new Error("이미 대상 공간을 소유한 사람에게 관리 권한을 줄 수 없습니다.");
     }
+    const recipientOwnsSource = careSpaceMembers.some(
+      (member) =>
+        member.care_space_id === current.care_space_id &&
+        member.user_id === MOCK_USER_ID &&
+        member.role === "owner"
+    );
+    if (recipientOwnsSource) {
+      throw new Error("이미 요청 공간을 소유하고 있어 가족 관계를 만들 수 없습니다.");
+    }
 
     const timestamp = now();
     replaceById(careSpaceInvites, {
@@ -520,6 +541,41 @@ export class MockDbRepository implements DbRepository {
         updated_at: timestamp,
       });
     }
+    const existingRecipient = careSpaceMembers.find(
+      (candidate) =>
+        candidate.care_space_id === current.care_space_id &&
+        candidate.user_id === MOCK_USER_ID
+    );
+    if (existingRecipient && existingRecipient.role !== "owner") {
+      existingRecipient.role = "caregiver";
+      existingRecipient.invited_by = current.invited_by;
+      existingRecipient.updated_at = timestamp;
+    } else if (!existingRecipient) {
+      careSpaceMembers.push({
+        care_space_id: current.care_space_id,
+        user_id: MOCK_USER_ID,
+        role: "caregiver",
+        invited_by: current.invited_by,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+    }
+    familyRelationships.push({
+      id: `relationship-${current.id}`,
+      other_user_id: current.invited_by,
+      other_display_name:
+        profileById(current.invited_by)?.display_name ?? "사용자",
+      caller_can_manage_other_records: true,
+      other_can_manage_caller_records: true,
+      manageable_care_space_id: current.care_space_id,
+      manageable_care_space_name: careSpaceById(current.care_space_id).name,
+      caller_shared_care_space_id: inviterCaregiverCareSpaceId,
+      caller_shared_care_space_name: careSpaceById(
+        inviterCaregiverCareSpaceId
+      ).name,
+      can_upgrade_to_reciprocal: false,
+      started_at: timestamp,
+    });
     const member = careSpaceMembers.find(
       (candidate) =>
         candidate.care_space_id === inviterCaregiverCareSpaceId &&
@@ -561,6 +617,80 @@ export class MockDbRepository implements DbRepository {
     return clone(updated);
   }
 
+  async upgradeFamilyRelationshipToReciprocal(
+    relationshipId: string,
+    callerCareSpaceId: string
+  ): Promise<string> {
+    const relationship = familyRelationships.find(
+      (candidate) => candidate.id === relationshipId
+    );
+    if (!relationship) return missing("가족 관계");
+    if (!relationship.can_upgrade_to_reciprocal) return relationship.id;
+    const ownerMembership = careSpaceMembers.find(
+      (member) =>
+        member.care_space_id === callerCareSpaceId &&
+        member.user_id === MOCK_USER_ID &&
+        member.role === "owner"
+    );
+    if (!ownerMembership) {
+      throw new Error("본인이 소유한 복약 공간만 공유할 수 있습니다.");
+    }
+    const timestamp = now();
+    const existing = careSpaceMembers.find(
+      (member) =>
+        member.care_space_id === callerCareSpaceId &&
+        member.user_id === relationship.other_user_id
+    );
+    if (existing && existing.role !== "owner") {
+      existing.role = "caregiver";
+      existing.updated_at = timestamp;
+    } else if (!existing) {
+      careSpaceMembers.push({
+        care_space_id: callerCareSpaceId,
+        user_id: relationship.other_user_id,
+        role: "caregiver",
+        invited_by: MOCK_USER_ID,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+    }
+    relationship.other_can_manage_caller_records = true;
+    relationship.caller_shared_care_space_id = callerCareSpaceId;
+    relationship.caller_shared_care_space_name = careSpaceById(
+      callerCareSpaceId
+    ).name;
+    relationship.can_upgrade_to_reciprocal = false;
+    return relationship.id;
+  }
+
+  async endFamilyRelationship(relationshipId: string): Promise<string> {
+    const relationshipIndex = familyRelationships.findIndex(
+      (candidate) => candidate.id === relationshipId
+    );
+    if (relationshipIndex < 0) return missing("가족 관계");
+    const relationship = familyRelationships[relationshipIndex];
+    if (relationship.caller_can_manage_other_records) {
+      const membershipIndex = careSpaceMembers.findIndex(
+        (member) =>
+          member.care_space_id === relationship.manageable_care_space_id &&
+          member.user_id === MOCK_USER_ID &&
+          member.role === "caregiver"
+      );
+      if (membershipIndex >= 0) careSpaceMembers.splice(membershipIndex, 1);
+    }
+    if (relationship.other_can_manage_caller_records) {
+      const membershipIndex = careSpaceMembers.findIndex(
+        (member) =>
+          member.care_space_id === relationship.caller_shared_care_space_id &&
+          member.user_id === relationship.other_user_id &&
+          member.role === "caregiver"
+      );
+      if (membershipIndex >= 0) careSpaceMembers.splice(membershipIndex, 1);
+    }
+    familyRelationships.splice(relationshipIndex, 1);
+    return relationship.id;
+  }
+
   async removeCareSpaceMember(
     careSpaceId: string,
     userId: string
@@ -574,6 +704,16 @@ export class MockDbRepository implements DbRepository {
     const member = careSpaceMembers[index];
     if (member.role === "owner") {
       throw new Error("공간 소유자는 제거할 수 없습니다.");
+    }
+    if (
+      familyRelationships.some(
+        (relationship) =>
+          relationship.other_user_id === userId &&
+          relationship.caller_shared_care_space_id === careSpaceId &&
+          relationship.other_can_manage_caller_records
+      )
+    ) {
+      throw new Error("가족 관계 종료 기능을 사용해 주세요.");
     }
     careSpaceMembers.splice(index, 1);
     return clone(member);

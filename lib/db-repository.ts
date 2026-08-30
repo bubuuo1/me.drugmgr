@@ -11,6 +11,7 @@ import type {
   DB,
   DailyStatus,
   DailyStatusInput,
+  FamilyRelationship,
   Medication,
   MedicationLog,
   MedicationSchedule,
@@ -24,6 +25,7 @@ export interface DbRepository {
   fetchCareSpaces(): Promise<CareSpaceAccess[]>;
   updateCareSpace(careSpaceId: string, name: string): Promise<CareSpace>;
   fetchPendingCareSpaceInvites(): Promise<PendingCareSpaceInvite[]>;
+  fetchFamilyRelationships(): Promise<FamilyRelationship[]>;
   fetchCareSpaceMembers(
     careSpaceId: string
   ): Promise<CareSpaceMemberWithProfile[]>;
@@ -38,6 +40,11 @@ export interface DbRepository {
   ): Promise<CareSpaceMember>;
   declineCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite>;
   revokeCareSpaceInvite(inviteId: string): Promise<CareSpaceInvite>;
+  upgradeFamilyRelationshipToReciprocal(
+    relationshipId: string,
+    callerCareSpaceId: string
+  ): Promise<string>;
+  endFamilyRelationship(relationshipId: string): Promise<string>;
   removeCareSpaceMember(
     careSpaceId: string,
     userId: string

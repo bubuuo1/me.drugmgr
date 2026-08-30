@@ -100,7 +100,7 @@ export async function sendInviteEmail({
   const inviteUrlString = inviteUrl.toString();
   const escapedInviteUrl = htmlEscape(inviteUrlString);
   const plainDescription =
-    "초대한 사람이 내 복약 기록을 보호자로 관리하도록 요청했습니다. 수락할 때 내가 소유한 복약 공간을 직접 선택해야 하며, 보호자는 그 공간의 약·일정·투약·상태 기록을 조회하고 변경할 수 있습니다.";
+    "서로의 복약 기록을 보호자로 관리하는 가족 요청입니다. 수락할 때 내가 소유한 복약 공간을 직접 선택하고 양방향 공유에 동의해야 합니다. 수락 후 두 사람은 각각 상대 공간의 약·일정·투약·상태 기록을 조회하고 변경할 수 있습니다.";
   const htmlDescription = htmlEscape(plainDescription);
 
   const transporter = nodemailer.createTransport({
