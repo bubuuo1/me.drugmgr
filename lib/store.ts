@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -62,6 +63,8 @@ class DataRequestCoordinator {
   private selectedCareSpaceId: string | null = null;
   private generation = 0;
   private selectionGeneration = 0;
+  private activeForegroundOperations = 0;
+  private foregroundOperationVersion = 0;
 
   begin(): number {
     this.generation += 1;
@@ -70,6 +73,31 @@ class DataRequestCoordinator {
 
   isCurrent(generation: number): boolean {
     return generation === this.generation;
+  }
+
+  snapshot(): number {
+    return this.generation;
+  }
+
+  beginForegroundOperation(): number {
+    this.activeForegroundOperations += 1;
+    this.foregroundOperationVersion += 1;
+    return this.foregroundOperationVersion;
+  }
+
+  finishForegroundOperation(): void {
+    this.activeForegroundOperations = Math.max(
+      0,
+      this.activeForegroundOperations - 1
+    );
+  }
+
+  hasActiveForegroundOperation(): boolean {
+    return this.activeForegroundOperations > 0;
+  }
+
+  foregroundOperationSnapshot(): number {
+    return this.foregroundOperationVersion;
   }
 
   selectedId(): string | null {
@@ -199,6 +227,39 @@ function replaceRow<T extends { id: string }>(rows: T[], row: T): T[] {
     : [...rows, row];
 }
 
+function isStructurallyEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => isStructurallyEqual(value, right[index]))
+    );
+  }
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== "object" ||
+    typeof right !== "object"
+  ) {
+    return false;
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.hasOwn(rightRecord, key) &&
+        isStructurallyEqual(leftRecord[key], rightRecord[key])
+    )
+  );
+}
+
 function preferredCareSpace(
   spaces: CareSpaceAccess[],
   preferredId: string | null
@@ -315,6 +376,7 @@ export function DbProvider({ children }: PropsWithChildren) {
     null
   );
   const [dataRequests] = useState(() => new DataRequestCoordinator());
+  const backgroundRevalidation = useRef<Promise<void> | null>(null);
   const [careSpaceMembersBySpace, setCareSpaceMembersBySpace] = useState<
     Record<string, CareSpaceMemberWithProfile[]>
   >({});
@@ -371,6 +433,7 @@ export function DbProvider({ children }: PropsWithChildren) {
   const run = useCallback(
     async <T,>(operation: () => Promise<T>): Promise<T> => {
       const generation = repositoryGeneration;
+      dataRequests.beginForegroundOperation();
       begin();
       try {
         const result = await operation();
@@ -389,10 +452,11 @@ export function DbProvider({ children }: PropsWithChildren) {
         setError(caught.message);
         throw caught;
       } finally {
+        dataRequests.finishForegroundOperation();
         finish();
       }
     },
-    [begin, finish]
+    [begin, dataRequests, finish]
   );
 
   const requireSelectedCareSpace = useCallback((): CareSpaceAccess => {
@@ -485,6 +549,71 @@ export function DbProvider({ children }: PropsWithChildren) {
     setSelectedCareSpaceId(result.selected?.id ?? null);
     setDb(result.next);
   }, [dataRequests, run]);
+
+  const revalidateAccessibleSpacesSilently = useCallback((): Promise<void> => {
+    if (backgroundRevalidation.current) {
+      return backgroundRevalidation.current;
+    }
+    if (dataRequests.hasActiveForegroundOperation()) {
+      return Promise.resolve();
+    }
+
+    const repositoryGenerationAtStart = repositoryGeneration;
+    const requestGeneration = dataRequests.snapshot();
+    const runVersionAtStart = dataRequests.foregroundOperationSnapshot();
+    const preferredId = dataRequests.selectedId();
+    const operation = (async () => {
+      const canApply = () =>
+        repositoryGenerationAtStart === repositoryGeneration &&
+        dataRequests.isCurrent(requestGeneration) &&
+        dataRequests.foregroundOperationSnapshot() === runVersionAtStart &&
+        !dataRequests.hasActiveForegroundOperation();
+
+      const spaces = await repository.fetchCareSpaces();
+      const selected = preferredCareSpace(spaces, preferredId);
+      const selectedAccessWasRevoked =
+        preferredId !== null &&
+        !spaces.some((space) => space.id === preferredId);
+      if (!canApply()) return;
+
+      dataRequests.select(selected?.id ?? null);
+      setCareSpaces((current) =>
+        isStructurallyEqual(current, spaces) ? current : spaces
+      );
+      setSelectedCareSpaceId(selected?.id ?? null);
+      if (selectedAccessWasRevoked) {
+        setDb(EMPTY_DB);
+      }
+
+      const [pendingInvitesResult, nextResult] = await Promise.allSettled([
+        repository.fetchPendingCareSpaceInvites(),
+        selected ? repository.fetchAll(selected.id) : Promise.resolve(EMPTY_DB),
+      ]);
+      if (!canApply()) return;
+
+      if (pendingInvitesResult.status === "fulfilled") {
+        setPendingCareSpaceInvites((current) =>
+          isStructurallyEqual(current, pendingInvitesResult.value)
+            ? current
+            : pendingInvitesResult.value
+        );
+      }
+      if (nextResult.status === "fulfilled") {
+        setDb((current) =>
+          isStructurallyEqual(current, nextResult.value)
+            ? current
+            : nextResult.value
+        );
+      }
+    })();
+    const trackedOperation = operation.finally(() => {
+      if (backgroundRevalidation.current === trackedOperation) {
+        backgroundRevalidation.current = null;
+      }
+    });
+    backgroundRevalidation.current = trackedOperation;
+    return trackedOperation;
+  }, [dataRequests]);
 
   const refresh = useCallback(async () => {
     if (!selectedCareSpace) {
@@ -780,7 +909,7 @@ export function DbProvider({ children }: PropsWithChildren) {
       ) {
         return;
       }
-      void revalidateAccessibleSpaces().catch(() => undefined);
+      void revalidateAccessibleSpacesSilently().catch(() => undefined);
     }
 
     const intervalId = globalThis.setInterval(validateCurrentAccess, 30_000);
@@ -794,7 +923,7 @@ export function DbProvider({ children }: PropsWithChildren) {
         validateCurrentAccess
       );
     };
-  }, [initialized, privacyLocked, revalidateAccessibleSpaces]);
+  }, [initialized, privacyLocked, revalidateAccessibleSpacesSilently]);
 
   const clearError = useCallback(() => setError(null), []);
 

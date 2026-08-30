@@ -120,11 +120,82 @@ export default function Home() {
 
   return (
     <main className="flex flex-1 flex-col gap-7">
-      <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
-        <h1 id="quick-log-title" className="sr-only">
-          빠른 투약 기록
-        </h1>
+      <h1 id="quick-log-title" className="sr-only">
+        빠른 투약 기록
+      </h1>
 
+      <section
+        aria-labelledby="schedule-title"
+        className="rounded-2xl border border-hairline px-5 py-5"
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="schedule-title" className="text-xl font-bold text-ink">
+            오늘 예정
+          </h2>
+          {todaySchedules.length > 0 && (
+            <p className="text-base font-semibold text-body">
+              {recordedScheduleCount}/{todaySchedules.length}개 일정 기록
+            </p>
+          )}
+        </div>
+
+        {todaySchedules.length === 0 ? (
+          <p className="mt-3 text-base leading-relaxed text-muted">
+            등록된 복용 일정이 없습니다.
+          </p>
+        ) : (
+          <ul className="mt-4 flex flex-col gap-3">
+            {todaySchedules.map((schedule) => {
+              const medication = medById.get(schedule.medication_id);
+              if (!medication) return null;
+              const log = todayLogs.find(
+                (candidate) => candidate.schedule_id === schedule.id
+              );
+              return (
+                <li key={schedule.id}>
+                  {log ? (
+                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3">
+                      <div>
+                        <p className="text-lg font-bold text-ink">
+                          {schedule.time} · {medication.name}
+                        </p>
+                        <p className="text-base text-body">
+                          실제 기록 {formatDateTime(log.taken_at)}
+                        </p>
+                      </div>
+                      <span className="font-bold text-success">기록 있음</span>
+                    </div>
+                  ) : canWriteRecords ? (
+                    <Link
+                      href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}`}
+                      className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 active:bg-surface-soft"
+                    >
+                      <div>
+                        <p className="text-lg font-bold text-ink">
+                          {schedule.time} · {medication.name}
+                        </p>
+                      </div>
+                      <span className="flex flex-col text-right font-bold">
+                        <span className="text-muted">아직 기록 없음</span>
+                        <span className="text-primary-active">기록하기</span>
+                      </span>
+                    </Link>
+                  ) : (
+                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3">
+                      <p className="text-lg font-bold text-ink">
+                        {schedule.time} · {medication.name}
+                      </p>
+                      <span className="font-bold text-muted">아직 기록 없음</span>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="quick-log-title" className="flex flex-col gap-5">
         {loading && (
           <p
             role="status"
@@ -233,77 +304,6 @@ export default function Home() {
           복용기록 확인
         </Link>
       </nav>
-
-      <section
-        aria-labelledby="schedule-title"
-        className="rounded-2xl border border-hairline px-5 py-5"
-      >
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="schedule-title" className="text-xl font-bold text-ink">
-            오늘 예정
-          </h2>
-          {todaySchedules.length > 0 && (
-            <p className="text-base font-semibold text-body">
-              {recordedScheduleCount}/{todaySchedules.length}개 일정 기록
-            </p>
-          )}
-        </div>
-
-        {todaySchedules.length === 0 ? (
-          <p className="mt-3 text-base leading-relaxed text-muted">
-            등록된 복용 일정이 없습니다.
-          </p>
-        ) : (
-          <ul className="mt-4 flex flex-col gap-3">
-            {todaySchedules.map((schedule) => {
-              const medication = medById.get(schedule.medication_id);
-              if (!medication) return null;
-              const log = todayLogs.find(
-                (candidate) => candidate.schedule_id === schedule.id
-              );
-              return (
-                <li key={schedule.id}>
-                  {log ? (
-                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3">
-                      <div>
-                        <p className="text-lg font-bold text-ink">
-                          {schedule.time} · {medication.name}
-                        </p>
-                        <p className="text-base text-body">
-                          실제 기록 {formatDateTime(log.taken_at)}
-                        </p>
-                      </div>
-                      <span className="font-bold text-success">기록 있음</span>
-                    </div>
-                  ) : canWriteRecords ? (
-                    <Link
-                      href={`/log?med=${encodeURIComponent(medication.id)}&schedule=${encodeURIComponent(schedule.id)}`}
-                      className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 active:bg-surface-soft"
-                    >
-                      <div>
-                        <p className="text-lg font-bold text-ink">
-                          {schedule.time} · {medication.name}
-                        </p>
-                      </div>
-                      <span className="flex flex-col text-right font-bold">
-                        <span className="text-muted">아직 기록 없음</span>
-                        <span className="text-primary-active">기록하기</span>
-                      </span>
-                    </Link>
-                  ) : (
-                    <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3">
-                      <p className="text-lg font-bold text-ink">
-                        {schedule.time} · {medication.name}
-                      </p>
-                      <span className="font-bold text-muted">아직 기록 없음</span>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
 
       <Link
         href="/settings"

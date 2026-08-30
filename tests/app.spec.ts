@@ -148,9 +148,32 @@ test("홈에서 빠른 기록, 상태, 복용기록과 모바일 하단 메뉴�
 }) => {
   await page.goto("/");
 
-  const quickLogSection = page.locator("main > :first-child");
+  const scheduleSection = page.getByRole("region", { name: "오늘 예정" });
+  await expect(scheduleSection).toBeVisible();
+  await expect(page.locator("main > section:first-of-type")).toHaveAttribute(
+    "aria-labelledby",
+    "schedule-title"
+  );
+  await expect
+    .poll(() =>
+      scheduleSection.evaluate((schedule) => {
+        const quickLog = document.querySelector(
+          '[aria-labelledby="quick-log-title"]'
+        );
+        const recordsLink = document.querySelector('a[href="/records"]');
+        return [quickLog, recordsLink].every(
+          (candidate) =>
+            candidate !== null &&
+            Boolean(
+              schedule.compareDocumentPosition(candidate) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+            )
+        );
+      })
+    )
+    .toBe(true);
   await expect(
-    quickLogSection.getByRole("heading", {
+    page.getByRole("heading", {
       level: 1,
       name: "빠른 투약 기록",
     })
@@ -642,6 +665,49 @@ test("320px와 375px 모바일 화면에서 주요 화면과 시간 선택기가
       .toBe(true);
   }
 
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "새 약 추가", exact: true }).click();
+  const medicationForm = page.getByRole("group", { name: "새 약" });
+  await expect(medicationForm).toBeVisible();
+  const visualTitle = medicationForm.locator('p[aria-hidden="true"]', {
+    hasText: "새 약",
+  });
+  await expect(visualTitle).toHaveText("새 약");
+
+  const formBox = await medicationForm.boundingBox();
+  const titleBox = await visualTitle.boundingBox();
+  expect(formBox).not.toBeNull();
+  expect(titleBox).not.toBeNull();
+  expect(titleBox?.y ?? -1).toBeGreaterThanOrEqual(formBox?.y ?? 0);
+  expect((titleBox?.y ?? 0) + (titleBox?.height ?? 0)).toBeLessThanOrEqual(
+    (formBox?.y ?? 0) + (formBox?.height ?? 0)
+  );
+
+  const viewportWidth = page.viewportSize()?.width ?? 320;
+  const elementsWithinViewport = [
+    medicationForm,
+    medicationForm.getByLabel("약 이름", { exact: true }),
+    medicationForm.getByLabel("단위", { exact: true }),
+    medicationForm.getByRole("textbox", { name: /^빠른 수량 선택지/ }),
+  ];
+  for (const element of elementsWithinViewport) {
+    const box = await element.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+      viewportWidth
+    );
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth
+      )
+    )
+    .toBe(true);
+
   await page.goto("/records");
   await page.locator("#record-date").click();
   await expect(
@@ -1077,17 +1143,17 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
   await expect(temporarySchedule).toBeVisible();
   await temporarySchedule
     .getByRole("button", {
-      name: `${testMedicationName} ${editedScheduleTime} 복용·알림 시간 삭제`,
+      name: `${testMedicationName} ${editedScheduleTime} 알림 시간 삭제`,
       exact: true,
     })
     .click();
   const scheduleDeleteDialog = page.getByRole("dialog", {
-    name: "복용·알림 시간을 삭제할까요?",
+    name: "알림 시간을 삭제할까요?",
   });
   await expect(scheduleDeleteDialog).toContainText(testMedicationName);
   await expect(scheduleDeleteDialog).toContainText(editedScheduleTime);
   await scheduleDeleteDialog
-    .getByRole("button", { name: "복용·알림 시간 삭제", exact: true })
+    .getByRole("button", { name: "알림 시간 삭제", exact: true })
     .click();
   await expect(
     settingsCard
@@ -1337,15 +1403,15 @@ test("설정부터 예정 기록, 상태, 기록 수정·삭제·복원까지 �
     .filter({ hasText: keptScheduleTime });
   await keptSchedule
     .getByRole("button", {
-      name: `${testMedicationName} ${keptScheduleTime} 복용·알림 시간 삭제`,
+      name: `${testMedicationName} ${keptScheduleTime} 알림 시간 삭제`,
       exact: true,
     })
     .click();
   const keptScheduleDeleteDialog = page.getByRole("dialog", {
-    name: "복용·알림 시간을 삭제할까요?",
+    name: "알림 시간을 삭제할까요?",
   });
   await keptScheduleDeleteDialog
-    .getByRole("button", { name: "복용·알림 시간 삭제", exact: true })
+    .getByRole("button", { name: "알림 시간 삭제", exact: true })
     .click();
   await expect(keptSchedule).toHaveCount(0);
 

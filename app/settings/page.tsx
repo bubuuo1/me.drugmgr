@@ -87,6 +87,7 @@ export default function SettingsPage() {
     updateSchedule,
     deleteSchedule,
     canManageMedicationSettings,
+    initialized,
   } = useDb();
 
   const [addingMedication, setAddingMedication] = useState(false);
@@ -350,7 +351,7 @@ export default function SettingsPage() {
     try {
       await deleteSchedule(schedule.id);
       await dismissScheduleNotifications(schedule.id);
-      setSuccess(`${schedule.time} 복용·알림 시간을 삭제했습니다.`);
+      setSuccess(`${schedule.time} 알림 시간을 삭제했습니다.`);
       setConfirmation(null);
     } catch (caught) {
       setLocalError(messageOf(caught));
@@ -360,7 +361,14 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading && medications.length === 0) {
+  const showFullPageLoading =
+    !initialized ||
+    (loading &&
+      medications.length === 0 &&
+      !addingMedication &&
+      pendingKey === null);
+
+  if (showFullPageLoading) {
     return (
       <main className="flex flex-1 flex-col gap-6">
         <h1 className="sr-only">환경설정</h1>
@@ -704,11 +712,11 @@ export default function SettingsPage() {
                                     medication,
                                   })
                                 }
-                                aria-label={`${medication.name} ${schedule.time} 복용·알림 시간 삭제`}
+                                aria-label={`${medication.name} ${schedule.time} 알림 시간 삭제`}
                                 disabled={pendingKey !== null || !online}
                                 className="flex min-h-12 items-center justify-center rounded-full border border-warning bg-canvas px-3 text-base font-bold text-warning"
                               >
-                                복용·알림 시간 삭제
+                                알림 시간 삭제
                               </button>
                             </div>
                           </li>
@@ -799,7 +807,7 @@ export default function SettingsPage() {
 
       {confirmation?.kind === "schedule" && (
         <ConfirmDialog
-          title="복용·알림 시간을 삭제할까요?"
+          title="알림 시간을 삭제할까요?"
           description={
             <p>
               <strong className="text-ink">
@@ -809,7 +817,7 @@ export default function SettingsPage() {
               제거되고, 이미 작성한 투약 기록은 유지됩니다.
             </p>
           }
-          confirmLabel="복용·알림 시간 삭제"
+          confirmLabel="알림 시간 삭제"
           destructive
           pending={pendingKey !== null}
           onCancel={() => setConfirmation(null)}
@@ -840,47 +848,50 @@ function MedicationForm({
   return (
     <fieldset
       disabled={pending}
-      className="flex flex-col gap-4 rounded-2xl bg-surface-soft px-5 py-5"
+      className="flex w-full min-w-0 flex-col gap-4 rounded-2xl bg-surface-soft px-5 py-5"
     >
-      <legend className="px-1 text-lg font-bold text-ink">{title}</legend>
-      <label className="flex flex-col gap-2 text-base font-bold text-body">
+      <legend className="sr-only">{title}</legend>
+      <p aria-hidden="true" className="text-lg font-bold text-ink">
+        {title}
+      </p>
+      <label className="flex min-w-0 flex-col gap-2 text-base font-bold text-body">
         약 이름
         <input
           value={draft.name}
           onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
+          className="min-h-14 w-full min-w-0 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
         />
       </label>
-      <label className="flex min-h-14 items-center gap-3 rounded-xl border border-hairline bg-canvas px-4 text-base font-bold text-ink">
+      <label className="flex min-h-14 min-w-0 items-center gap-3 rounded-xl border border-hairline bg-canvas px-4 text-base font-bold text-ink">
         <input
           type="checkbox"
           checked={draft.booleanOnly}
           onChange={(event) =>
             setDraft({ ...draft, booleanOnly: event.target.checked })
           }
-          className="h-6 w-6 accent-primary-active"
+          className="h-6 w-6 shrink-0 accent-primary-active"
         />
         수량 없이 복용 여부만 기록
       </label>
       {!draft.booleanOnly && (
         <>
-          <label className="flex flex-col gap-2 text-base font-bold text-body">
+          <label className="flex min-w-0 flex-col gap-2 text-base font-bold text-body">
             단위
             <input
               value={draft.unit}
               onChange={(event) => setDraft({ ...draft, unit: event.target.value })}
-              className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
+              className="min-h-14 w-full min-w-0 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
               placeholder="예: 정, mL"
             />
           </label>
-          <label className="flex flex-col gap-2 text-base font-bold text-body">
+          <label className="flex min-w-0 flex-col gap-2 text-base font-bold text-body">
             빠른 수량 선택지
             <input
               value={draft.options}
               onChange={(event) =>
                 setDraft({ ...draft, options: event.target.value })
               }
-              className="min-h-14 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
+              className="min-h-14 w-full min-w-0 rounded-xl border border-hairline bg-canvas px-4 text-lg font-normal text-ink focus:border-2 focus:border-ink"
               placeholder="숫자를 쉼표로 구분"
             />
             <span className="font-normal leading-relaxed text-muted">
